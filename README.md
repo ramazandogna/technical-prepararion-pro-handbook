@@ -36,6 +36,12 @@ npm run build      # type-check (vue-tsc) + production build to dist/
 npm run preview    # serve the production build
 ```
 
+## Deploy (GitHub Pages)
+
+Pushing to `main` runs `.github/workflows/pages.yml`, which builds with `VITE_BASE=/<repo>/` and publishes to
+https://ramazandogna.github.io/technical-prepararion-pro-handbook/ (Settings → Pages → Source: GitHub Actions).
+`404.html` is a copy of `index.html` so deep links work.
+
 ## Deploy (Vercel)
 
 1. Push the repository to GitHub.
