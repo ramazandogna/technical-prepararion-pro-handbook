@@ -1,0 +1,39 @@
+{
+  "name": "interview-os",
+  "version": "0.1.0-alpha",
+  "private": true,
+  "description": "Interview OS — Personalized Software Engineering Interview Preparation",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --build && vite build",
+    "build-only": "vite build",
+    "type-check": "vue-tsc --build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "highlight.js": "^11.12.0",
+    "idb": "^8.0.4",
+    "lucide-vue-next": "^1.0.0",
+    "marked": "^18.2.1",
+    "pinia": "^4.1.0",
+    "rei-kit": "^4.4.0",
+    "vue": "^3.5.45",
+    "vue-i18n": "^11.4.22",
+    "vue-router": "^5.5.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.5",
+    "@tsconfig/node24": "^24.0.6",
+    "@types/node": "^24.19.2",
+    "@vitejs/plugin-vue": "^6.0.11",
+    "@vue/tsconfig": "^0.9.1",
+    "tailwindcss": "^4.3.5",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.8",
+    "vue-tsc": "^3.3.14"
+  }
+}

@@ -1,0 +1,10 @@
+@import 'tailwindcss';
+@import 'rei-kit/web.css';
+
+/* App-level theme overrides and prose styles live in ./app.css (UX owner). */
+@import './app.css';
+
+@theme {
+  --measure-page: 1200px;
+  --measure-reading: 72ch;
+}
