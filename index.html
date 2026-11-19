@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="Interview OS — Personalized Software Engineering Interview Preparation" />
+    <meta name="theme-color" content="#1a1b26" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Interview OS</title>
+    <script>
+      // Apply stored theme before first paint to avoid a light flash (rei-kit useTheme storage).
+      try {
+        var t = localStorage.getItem("ios-theme") || 'system'
+        var dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+        if (dark) document.documentElement.classList.add('dark')
+        var p = localStorage.getItem('ios-palette') || 'tokyo-night'
+        if (p !== 'rei') document.documentElement.dataset.palette = p
+      } catch (e) {}
+    </script>
+  </head>
+  <body class="canvas">
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
