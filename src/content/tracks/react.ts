@@ -40,10 +40,43 @@ const track: Track = {
   return <button onClick={handleClick}>{count}</button>
 }`,
           },
+          intent:
+            'Tests whether you understand that state is a per-render snapshot and that setState queues updates rather than mutating. A strong answer gives both numbers (log and display), walks the update queue step by step, and names the updater form as the fix.',
           hints: [
-            'Inside this render, count is a constant.',
-            'setState queues an update; it does not change the variable.',
-            'An updater function receives the pending value.',
+            'Inside this render, `count` is a `const`. Can anything in `handleClick` change it?',
+            '`setCount` does not assign; it pushes an entry onto an update queue that React processes on the next render.',
+            'Process the queue in order: "replace with 0+1", "replace with 0+1", then "take the pending value and add 1".',
+            'The log runs before any re-render, so it sees the old snapshot: `0`. The queue yields 1 → 1 → 2, and there is a single batched re-render.',
+          ],
+          walkthrough: [
+            {
+              title: 'Separate the two questions',
+              body: `The interviewer asks two things: what the **log** prints (during the click, in the *current* render) and what the **screen** shows (after the *next* render). Answer them separately: **logs \`0\`, displays \`2\`**.`,
+            },
+            {
+              title: 'State is a snapshot per render',
+              body: `Each render is a function call with its own \`const count\`. \`handleClick\` closes over that render's value. \`setCount\` asks React to schedule a new render with a new value; it never reassigns the local \`count\`. So \`console.log(count)\` prints \`0\`.`,
+            },
+            {
+              title: 'Walk the update queue',
+              body: `React 18+ batches all updates from the same event into one render and applies them in order:
+\`\`\`text
+setCount(0 + 1)      -> queue: replace with 1     pending = 1
+setCount(0 + 1)      -> queue: replace with 1     pending = 1
+setCount(c => c + 1) -> queue: updater(1)         pending = 2
+\`\`\`
+A value replaces; an updater function receives the **pending** value. One re-render with \`count = 2\`.`,
+            },
+            {
+              title: 'Edge cases and the fix',
+              body: `- Use \`setX(prev => ...)\` whenever the next value depends on the previous one: repeated calls, timers, async callbacks.
+- Batching also applies in \`setTimeout\` and promise callbacks since React 18. \`flushSync\` forces a synchronous render (rarely needed, e.g. scroll to a newly added item).
+- Contrast with Vue: \`count.value++\` changes the value immediately; only the DOM update is deferred to the next tick.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"It logs 0 and shows 2. State is a snapshot: \`count\` is a constant for this render, and \`setCount\` only queues an update. React batches the three calls: the first two replace with 0 + 1, the updater gets the pending 1 and returns 2. One re-render. If the next state depends on the previous one, I always use the updater form."`,
+            },
           ],
           answer: `**It logs \`0\` and displays \`2\`.**
 
@@ -103,9 +136,48 @@ function TodoRow({ todo, onDelete }) {
   )
 }`,
           },
+          intent:
+            'Tests whether you know how React decides to reuse or remount a component, and that local state belongs to a position in the tree. A strong answer traces the deletion key by key, fixes it with a stable id, and mentions using key on purpose to reset state.',
           hints: [
-            'React matches old and new children by key.',
-            'After the deletion, which component instance has key 0?',
+            'React matches old and new children in a list by their `key`, not by the data they display.',
+            'Before the delete, keys are 0, 1, 2. After deleting the first item, which keys exist, and which instance owns key 0?',
+            'The instance with key 0 is reused, so its `useState` slot (the old draft) survives. `useState(todo.title)` only reads the prop on mount.',
+            'Fix: `key={todo.id}`. Then the instance for the deleted todo unmounts and every other row keeps its own state.',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate the symptom',
+              body: `State "moves" to the wrong row after a deletion. That is almost always an **identity** problem: React thinks the second row's component *is* the old first row's component.`,
+            },
+            {
+              title: 'How reconciliation matches children',
+              body: `For each position React compares the element **type** and **key** with the previous render:
+- same type + same key → **reuse the instance** (state kept), update props
+- different type or key → unmount the old, mount a new one (state lost)
+
+With \`key={i}\`, keys are positions. After deleting item 0, the old second todo now renders with key 0, so it inherits instance 0 and its \`draft\`. Key 2 disappears and its instance unmounts.`,
+            },
+            {
+              title: 'Apply the fix',
+              body: `\`\`\`jsx
+{todos.map((todo) => (
+  <TodoRow key={todo.id} todo={todo} onDelete={() => onDelete(todo.id)} />
+))}
+\`\`\`
+Keys must be **stable, unique among siblings and derived from the data**. If items have no id, create one when the item is created (\`crypto.randomUUID()\`), not during render.`,
+            },
+            {
+              title: 'Edge cases and related traps',
+              body: `- Index keys are acceptable only for static lists that never reorder, filter or prepend.
+- \`key={Math.random()}\` remounts every row on every render: lost focus, slow.
+- A component **defined inside** another component is a new type each render, so it remounts every time.
+- Use key deliberately to reset: \`<ProfileForm key={userId} />\`.
+- \`useState(prop)\` copies the prop only once; this bug is amplified by "props as initial state".`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"Index keys tie state to a position. After deleting the first row, the second todo gets key 0, so React reuses the first row's instance and its draft state. Keys must be stable ids from the data, so I'd use \`todo.id\`. Same type and key means reuse, different means remount, and I can change a key on purpose to reset a form."`,
+            },
           ],
           answer: `**Index keys tie component state to a position instead of to an item.** After deleting item 0, the item that used to be at index 1 now has **key 0**. React sees key 0 still present, **reuses that component instance and its state** (\`draft\` from the old first row), and passes it the new \`todo\` prop. Because \`useState(todo.title)\` uses the prop only as the *initial* value, the stale draft remains. The last key simply disappears.
 
@@ -174,7 +246,14 @@ function TodoRow({ todo, onDelete }) {
               explanation: 'React 19\'s `use` is the exception: it may be called conditionally.',
             },
           ],
-          hints: ['React identifies each hook by its call order.'],
+          intent:
+            'Tests whether you know why the rules of hooks exist (call-order slots on the fiber), not just the rule. A strong answer picks the right options, explains the mechanism, and knows the React 19 `use` exception.',
+          hints: [
+            'React does not know your hooks by name. How else could it tell `useState` #1 from `useState` #2 between renders?',
+            'Hooks are stored as an ordered list per component and matched by call order. Which options could change the number or order of calls between renders?',
+            'An early return before a hook and a hook inside a loop both change the call count. A custom hook at the top level does not.',
+            '`use()` does not occupy a hook slot, so React 19 allows it in conditions (but not in try/catch). Answer: a and b.',
+          ],
           answer: `**a and b break the rules.** Call hooks **only at the top level** of a component or custom hook, never conditionally, in loops or after an early return, and **only from React functions**.
 
 **Why:** React does not know hooks by name. It stores them as a list on the component's fiber and matches them by **call order**: the first \`useState\` gets slot 0, the next gets slot 1, and so on. If the order changes between renders, state ends up in the wrong hook. The ESLint plugin \`eslint-plugin-react-hooks\` catches these mistakes, and its \`exhaustive-deps\` rule catches missing dependencies.
@@ -232,10 +311,56 @@ function TodoRow({ todo, onDelete }) {
   return <p>{user?.name} has been here {seconds}s</p>
 }`,
           },
+          intent:
+            'Tests whether you treat effects as synchronisation with external systems: correct dependencies, cleanup for everything you start, and protection against out-of-order async results. A strong answer finds all three bugs, explains each mechanism, and writes the fixed code.',
           hints: [
-            'Which value of seconds does the interval callback see?',
-            'What happens to the interval when the component unmounts?',
-            'userId changes quickly from 1 to 2, and the response for 1 arrives last.',
+            'Look at each effect and ask: which values does it read, what does it start, and what stops it?',
+            'The interval effect has `[]` dependencies, so its callback closes over the `seconds` from the first render forever.',
+            'Nothing calls `clearInterval`, and nothing stops a slow response for an old `userId` from overwriting a newer one.',
+            'Fix shape: `setSeconds(s => s + 1)` + `return () => clearInterval(id)`; for fetch, create an `AbortController`, pass `signal`, ignore `AbortError`, and `return () => controller.abort()`.',
+          ],
+          walkthrough: [
+            {
+              title: 'Audit each effect',
+              body: `For every effect ask three questions: **what reactive values does it read**, **what does it start**, and **what stops it**. That checklist finds all three bugs: a stale closure, a missing cleanup and a fetch race.`,
+            },
+            {
+              title: 'Bug 1 and 2: the interval',
+              body: `With \`[]\`, the effect runs once and the callback captures \`seconds = 0\`, so \`setSeconds(0 + 1)\` runs forever: the counter sticks at 1. The interval is never cleared, so it leaks after unmount, and StrictMode's dev remount creates two.
+\`\`\`jsx
+useEffect(() => {
+  const id = setInterval(() => setSeconds((s) => s + 1), 1000)
+  return () => clearInterval(id)
+}, [])
+\`\`\`
+The updater form removes the dependency on \`seconds\`, so the interval is created once.`,
+            },
+            {
+              title: 'Bug 3: the fetch race',
+              body: `If \`userId\` goes 1 → 2 and response 1 arrives last, user 1 is shown for id 2. Cancel the stale request in the cleanup:
+\`\`\`jsx
+useEffect(() => {
+  const controller = new AbortController()
+  fetch(\`/api/users/\${userId}\`, { signal: controller.signal })
+    .then((r) => { if (!r.ok) throw new Error(\`HTTP \${r.status}\`); return r.json() })
+    .then(setUser)
+    .catch((err) => { if (err.name !== 'AbortError') setError(err) })
+  return () => controller.abort()
+}, [userId])
+\`\`\`
+An \`ignore\` boolean set in cleanup works too when the API cannot be aborted.`,
+            },
+            {
+              title: 'Trade-offs and the bigger picture',
+              body: `- Adding \`seconds\` to deps "works" but tears down and recreates the interval every tick.
+- Never silence \`exhaustive-deps\`; restructure instead. For "read the latest value without re-running", React 19.2's \`useEffectEvent\` is the tool.
+- Many effects should not exist: derive during render, handle events in handlers, reset with \`key\`.
+- In real apps, fetch with a loader, Server Components or TanStack Query, which handle races, caching and dedup.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"Three bugs. The interval closes over the first \`seconds\`, so I use the updater form. It is never cleared, so I return \`clearInterval\`; StrictMode would expose that. And the fetch can race when \`userId\` changes, so I abort the previous request in cleanup and handle errors. Effects synchronise with external systems: everything they start, the cleanup stops."`,
+            },
           ],
           answer: `**Bug 1: a stale closure.** The effect runs once (\`[]\`), so the interval callback closes over \`seconds = 0\` permanently, and the counter stays stuck at 1.
 **Bug 2: no cleanup.** The interval is never cleared. It leaks after unmount, and React StrictMode's development double-mount creates two intervals.
@@ -295,10 +420,46 @@ function Dashboard({ userId }) {
           estMinutes: 6,
           roles: ['frontend', 'full-stack'],
           prompt: `A teammate wraps **every** function in \`useCallback\` and every value in \`useMemo\` "for performance". **Is that right?** When do these hooks actually help, how do they relate to \`React.memo\`, and what is \`useRef\` for? How does the React Compiler change this?`,
+          intent:
+            'Tests whether you understand memoisation as a reference-stability and expensive-work tool, not a default. A strong answer says when each API pays off, prefers structural fixes first, explains useRef, and positions the React Compiler accurately.',
           hints: [
-            'Memoisation has a cost, and it only pays off when something compares references.',
-            'useCallback without a memoised child is usually pointless.',
-            'useRef stores a mutable value that does not trigger a re-render.',
+            'Memoisation costs memory and a dependency comparison on every render. Who benefits from a stable reference?',
+            'A `useCallback` only helps if something compares it: a `React.memo` child, or a dependency array of an effect or another memo.',
+            'Before memoising, can you move state down or pass the expensive subtree as `children` so it does not re-render at all?',
+            'Answer shape: "No. useMemo for measured expensive work or stable references; useCallback + memo child together; useRef for mutable non-render values; the Compiler now does most of this automatically."',
+          ],
+          walkthrough: [
+            {
+              title: 'Answer the yes/no first',
+              body: `**No.** Memoising everything adds cost (memory, comparisons, noisy code) and only helps where a **reference is compared** or the computation is **measurably expensive**.`,
+            },
+            {
+              title: 'How the pieces fit',
+              body: `- \`React.memo(Child)\` skips re-rendering when props are shallow-equal.
+- That only works if props keep the same reference, which is what \`useCallback\` (functions) and \`useMemo\` (objects, arrays, expensive results) provide.
+- Without a memo child or a dependency array that cares, \`useCallback\` is pure overhead.
+\`\`\`jsx
+const Row = memo(Row_)
+const onSelect = useCallback((id) => setSelected(id), [])
+const sorted = useMemo(() => [...items].sort(byDate), [items])
+\`\`\``,
+            },
+            {
+              title: 'Structural fixes before memoisation',
+              body: `- **Colocate state** so fewer components re-render.
+- **Lift content up as \`children\`**: a component that owns state and receives \`children\` does not re-render those children when its state changes.
+- **Virtualise** long lists. These usually beat any amount of memo.`,
+            },
+            {
+              title: 'useRef and the React Compiler',
+              body: `\`useRef\` holds a mutable value that survives renders **without** triggering one: DOM nodes, timer ids, the previous value. Do not read or write \`ref.current\` during render. In React 19, \`ref\` is a normal prop, so \`forwardRef\` is unnecessary.
+
+The **React Compiler** (v1.0, Oct 2025) memoises components, JSX and values at build time for code that follows the rules of React. Manual \`useMemo\`/\`useCallback\` remain for effect-dependency stability, third-party libraries that compare identity, and opting out with \`'use no memo'\` when debugging.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"Not by default. Memo only pays off when a reference is compared or the work is expensive and measured. useCallback matters together with a React.memo child or as a dependency. I'd first colocate state or use children composition. useRef is for mutable values that shouldn't re-render. With the React Compiler, most manual memoisation goes away."`,
+            },
           ],
           answer: `**No. Memoisation is a targeted tool.** Each hook costs memory, comparison work and complexity, and it only helps when **someone compares the reference** or the computation is genuinely expensive.
 
@@ -344,10 +505,13 @@ function List({ items }) {
           estMinutes: 5,
           roles: ['frontend', 'full-stack'],
           prompt: `You put \`{ user, theme, cart, setCart }\` into a single \`AppContext\`. Adding an item to the cart now re-renders the whole app. **Why, and how would you structure this?**`,
+          intent:
+            'Tests whether you know context has no selectors: every consumer re-renders when the value identity changes. A strong answer names the new-object-per-render cause, gives a ladder of fixes (memoise, split, external store), and says what context is actually for.',
           hints: [
-            'Every consumer re-renders when the context value changes, compared by Object.is.',
-            'The value object is new on every render of the provider.',
-            'Split contexts by how often they change, or use a store with selectors.',
+            'How does React decide that a context value "changed"? What comparison does it use?',
+            'The provider builds `{ user, theme, cart, setCart }` as a new object literal on every render, so `Object.is` is always false.',
+            'Even with a stable object, cart changes still re-render theme and user consumers. Can a consumer subscribe to part of a context?',
+            'Ladder: `useMemo` the value → split contexts by change frequency (and state vs dispatch) → a selector store (Zustand/Redux via `useSyncExternalStore`) for hot shared state.',
           ],
           answer: `**Every component that reads a context re-renders whenever the provider's \`value\` changes, compared with \`Object.is\`, and there is no way to subscribe to part of the value.** Here the value is a **new object on every provider render**, and it bundles fast-changing data (\`cart\`) with slow-changing data (\`user\`, \`theme\`), so every consumer re-renders on every cart change.
 
@@ -384,10 +548,64 @@ return <CartContext value={value}>{children}</CartContext> // React 19: <Context
           estMinutes: 20,
           roles: ['frontend', 'full-stack'],
           prompt: `Write \`useSearch(query)\`. It debounces the query by 300 ms, fetches \`/api/search?q=\`, cancels stale requests and returns \`{ status, results, error }\`. Make it reusable and typed.`,
+          intent:
+            'Tests whether you can compose hooks, manage timers and cancellation with effect cleanups, and type async state well. A strong answer splits debounce from fetch, aborts stale requests, models status as a discriminated union, and mentions when a query library is the better choice.',
           hints: [
-            'Split it into two hooks: useDebouncedValue, and the fetch logic.',
-            'Abort in the effect cleanup.',
-            'Model the status as a union.',
+            'Two concerns are tangled here: "wait until the user stops typing" and "fetch, but never show stale results". Could each be its own hook?',
+            '`useDebouncedValue(value, delay)`: set a timeout in an effect, and clear it in the cleanup so each keystroke restarts the timer.',
+            'For the fetch: an effect keyed on the debounced query, an `AbortController` per run, and `controller.abort()` in the cleanup. Ignore `AbortError`.',
+            'Type it: `type SearchState<T> = { status: "idle" | "loading" | "success"; results: T[]; error: null } | { status: "error"; results: T[]; error: Error }`; keep the previous results while loading.',
+          ],
+          walkthrough: [
+            {
+              title: 'Clarify the contract',
+              body: `Input: a raw \`query\` string. Output: \`{ status, results, error }\`. Requirements: 300 ms debounce, cancel stale requests, typed, reusable. Ask: should an empty query reset to idle? (Yes.) Should old results stay visible while loading? (Yes, to avoid flicker.)`,
+            },
+            {
+              title: 'Build the debounce hook',
+              body: `\`\`\`tsx
+export function useDebouncedValue<T>(value: T, delay = 300): T {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(id)
+  }, [value, delay])
+  return debounced
+}
+\`\`\`
+The cleanup runs before the next effect, so every keystroke restarts the timer.`,
+            },
+            {
+              title: 'Build the fetching hook',
+              body: `\`\`\`tsx
+export function useSearch<T>(query: string): SearchState<T> {
+  const q = useDebouncedValue(query.trim())
+  const [state, setState] = useState<SearchState<T>>({ status: 'idle', results: [], error: null })
+  useEffect(() => {
+    if (!q) { setState({ status: 'idle', results: [], error: null }); return }
+    const c = new AbortController()
+    setState((s) => ({ status: 'loading', results: s.results, error: null }))
+    fetch(\`/api/search?q=\${encodeURIComponent(q)}\`, { signal: c.signal })
+      .then((r) => { if (!r.ok) throw new Error(\`HTTP \${r.status}\`); return r.json() as Promise<T[]> })
+      .then((results) => setState({ status: 'success', results, error: null }))
+      .catch((e: Error) => { if (e.name !== 'AbortError') setState((s) => ({ status: 'error', results: s.results, error: e })) })
+    return () => c.abort()
+  }, [q])
+  return state
+}
+\`\`\``,
+            },
+            {
+              title: 'Edge cases and trade-offs',
+              body: `- \`encodeURIComponent\` the query; check \`r.ok\` because \`fetch\` does not reject on 4xx/5xx.
+- Do not create a debounced function during render; it is recreated every render.
+- Test with \`renderHook\`, fake timers and MSW.
+- In production, TanStack Query (\`queryKey: ['search', q]\`) adds caching, dedup and retries; \`useDeferredValue\` keeps typing responsive for client-side filtering.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"I'd compose two hooks: useDebouncedValue with a timeout cleared in cleanup, and useSearch that fetches on the debounced value with an AbortController aborted in cleanup, so stale responses can't win. Status is a discriminated union, and I keep old results while loading. In a real app I'd put the fetch behind TanStack Query for caching."`,
+            },
           ],
           answer: `**Compose two small hooks: one that debounces a value and one that fetches with cancellation.** Custom hooks share *stateful logic*, not state: every component that calls one gets its own copy.
 
@@ -472,10 +690,13 @@ export function useSearch<T>(query: string): SearchState<T> {
           estMinutes: 5,
           roles: ['frontend', 'full-stack'],
           prompt: `**Explain error boundaries and Suspense.** What do they catch, what do they not catch, and how do you place them in an app?`,
+          intent:
+            'Tests whether you know the exact scope of each boundary and can design loading and failure UX deliberately. A strong answer lists what error boundaries do not catch, names what triggers Suspense, and explains placement per independent region.',
           hints: [
-            'One handles "not ready yet", the other "something broke".',
-            'Error boundaries do not catch errors in event handlers.',
-            'Think about granularity: the whole page vs a widget.',
+            'One boundary handles "not ready yet", the other handles "something threw". Which is which?',
+            'Error boundaries only catch errors thrown while React is rendering their subtree. Is an `onClick` handler part of rendering?',
+            'Suspense reacts to something "suspending": `React.lazy`, `use(promise)`, or a Suspense-enabled data source. With a transition, React keeps the old UI instead of the fallback.',
+            'Placement: one root boundary as a last resort, plus a Suspense + ErrorBoundary pair around each independently useful widget or route segment (Next.js: `loading.tsx` / `error.tsx`).',
           ],
           answer: `They are the two **declarative boundaries** in React: **Suspense** handles *"not ready yet"* by showing a fallback while children load, and an **error boundary** handles *"something threw"* by showing a fallback UI instead of unmounting the whole app.
 
@@ -522,10 +743,49 @@ export function useSearch<T>(query: string): SearchState<T> {
           estMinutes: 6,
           roles: ['frontend', 'full-stack'],
           prompt: `**What are React Server Components, and how are they different from SSR?** What does \`'use client'\` actually mean, and how do server functions (\`'use server'\`) fit in?`,
+          intent:
+            'Tests whether you can separate a rendering technique (SSR) from a component type (RSC) and reason about the server/client module boundary. A strong answer explains what ships to the browser, what `use client` really marks, and the security implication of server functions.',
           hints: [
-            'SSR renders to HTML; RSC changes where components run.',
-            'Server components never ship their code to the browser.',
-            "'use client' marks a boundary, not a single component.",
+            'SSR answers "where is the first HTML produced?". RSC answers a different question: "where does this component run at all?"',
+            'A Server Component runs only on the server, can be `async`, and is never hydrated. What does that mean for the JavaScript bundle?',
+            '`\'use client\'` is placed at the top of a module. What happens to everything that module imports?',
+            'Shape: "SSR = HTML + full hydration; RSC = server-only components, zero JS, serialisable props across the boundary; `use client` = module-graph boundary; `use server` functions = public endpoints, so validate and authorise."',
+          ],
+          walkthrough: [
+            {
+              title: 'Separate the two concepts',
+              body: `**SSR** is a rendering technique: run the tree on the server to HTML, then ship all the component JS and **hydrate** it. **RSC** is a component type: components that run **only on the server** and send a serialised RSC payload; their code never reaches the browser. Frameworks combine both: the RSC tree is SSR'd to HTML for first paint.`,
+            },
+            {
+              title: 'The module boundary',
+              body: `In the App Router every component is a Server Component by default. \`'use client'\` at the top of a file makes **that module and everything it imports** client code (still SSR'd, then hydrated).
+- Server → client: allowed, props must be serialisable (no functions except server functions, no class instances).
+- Client → server import: not allowed, but a server component can be passed as \`children\` to a client component.`,
+            },
+            {
+              title: 'Show it in code',
+              body: `\`\`\`tsx
+// page.tsx (server)
+export default async function Page() {
+  const orders = await db.order.findMany({ take: 50 })
+  return <OrderFilters initialOrders={orders}><Summary /></OrderFilters>
+}
+// order-filters.tsx
+'use client'
+export function OrderFilters({ initialOrders, children }) { /* useState, onClick */ }
+\`\`\`
+Keep \`'use client'\` at the **leaves** (the interactive bits) to keep bundles small.`,
+            },
+            {
+              title: 'Server functions and trade-offs',
+              body: `\`'use server'\` functions run on the server and can be called from the client (form \`action\`, \`useActionState\`). Under the hood they are a POST endpoint, so **validate input and check auth inside each one**; never trust that only your UI calls them.
+
+Trade-offs: smaller bundles, data fetching next to the data, no API layer for reads; in exchange for framework dependence, serialisation limits, a harder mental model and caching you must understand.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"SSR renders HTML and then hydrates everything; Server Components run only on the server and ship no JavaScript, so they can be async and hit the database directly. \`'use client'\` marks a module-graph boundary: that file and its imports go to the browser, and props crossing it must be serialisable. Server functions are callable from the client, so I treat each like a public endpoint with validation and auth."`,
+            },
           ],
           answer: `**Server Components (RSC) are components that run only on the server** (at build time or per request) and send a serialised description of their output (the RSC payload) to the client. **Their code and dependencies never reach the browser bundle.** Client Components are the familiar interactive components; they are pre-rendered to HTML on the server *and* hydrated in the browser.
 
@@ -585,10 +845,55 @@ export function OrderFilters({ initialOrders }) { /* useState, onClick ... */ }
   )
 }`,
           },
+          intent:
+            'Tests whether you understand that hydration requires the first client render to match the server HTML exactly. A strong answer finds both causes in the snippet, fixes them without blanket suppression, and lists other real-world causes such as invalid nesting and DOM-mutating third-party scripts.',
           hints: [
-            'On the server, window is undefined.',
-            'The server and the browser render at different times, possibly in different time zones and locales.',
-            'Render the same thing first, then update on the client.',
+            'Hydration re-renders on the client and compares with the server HTML. Which values in this component can differ between those two renders?',
+            'On the server `typeof window` is `"undefined"`, so `isMobile` is always false there. And `new Date()` is evaluated at two different moments, possibly in different time zones.',
+            'Rule: the first client render must equal the server render. Move layout differences to CSS and client-only values to after hydration.',
+            'Fix shape: render both "Hello" and "Hi" with `hidden md:inline` / `md:hidden`; `const [now, setNow] = useState(null)` + `useEffect(() => setNow(new Date()), [])`; `suppressHydrationWarning` only on the `<time>` text node.',
+          ],
+          walkthrough: [
+            {
+              title: 'Explain hydration first',
+              body: `The server sends HTML. On the client, \`hydrateRoot\` renders the same tree and **attaches** to the existing DOM instead of creating it. React expects the first client render to produce identical output. On a mismatch, React throws away that boundary's HTML and re-renders on the client: slower, and the user may see a flash.`,
+            },
+            {
+              title: 'Find the two causes',
+              body: `1. \`typeof window !== 'undefined'\` is false on the server ("Hello") and true on a phone ("Hi").
+2. \`new Date().toLocaleTimeString()\` runs at two moments, and server/browser time zone and locale can differ.
+
+Both make the first client render differ from the HTML.`,
+            },
+            {
+              title: 'Fix without hiding it',
+              body: `\`\`\`jsx
+export function Greeting() {
+  const [now, setNow] = useState(null)
+  useEffect(() => setNow(new Date()), [])
+  return (
+    <p>
+      <span className="hidden md:inline">Hello</span>
+      <span className="md:hidden">Hi</span>
+      {now && <>, it is <time suppressHydrationWarning>{now.toLocaleTimeString()}</time></>}
+    </p>
+  )
+}
+\`\`\`
+Layout → CSS media queries. Client-only values (time, \`localStorage\`, viewport) → placeholder first, fill in an effect, or \`useSyncExternalStore\` with \`getServerSnapshot\`.`,
+            },
+            {
+              title: 'Other causes to check',
+              body: `- Invalid nesting (\`<div>\` in \`<p>\`, \`<a>\` in \`<a>\`): the browser repairs the HTML before React sees it.
+- Random ids → \`useId\`.
+- Browser extensions or **third-party scripts** (consent banners, widgets) mutating the DOM before hydration.
+- Data that changed between server render and client (serialise it into the page instead of refetching).
+React 19 prints a single diff of expected vs actual, which speeds this up.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"Hydration needs the first client render to match the server HTML. Here \`window\` doesn't exist on the server and the date differs by time and zone. I'd move the mobile text to CSS, render the time only after mount in an effect, and keep \`suppressHydrationWarning\` to that single text node. I'd also check invalid nesting and scripts that mutate the DOM before hydration."`,
+            },
           ],
           answer: `**Hydration** is React attaching event handlers and state to HTML that was rendered on the server. It renders the tree again on the client and **expects exactly the same output** on the first pass. When the output differs, React reports a mismatch and, for that boundary, falls back to rendering on the client. That costs performance, and the page can visibly flicker.
 
@@ -639,10 +944,13 @@ export function Greeting() {
           estMinutes: 6,
           roles: ['frontend', 'full-stack'],
           prompt: `Typing in a filter box above a 5,000-row table is laggy. **How do you diagnose it, and what are your options for fixing it?**`,
+          intent:
+            'Tests whether you diagnose before optimising and know the high-impact levers in order. A strong answer names concrete tools (Profiler, Performance panel, production build), then virtualisation, transitions/deferred values, and state colocation, and connects it to INP.',
           hints: [
-            'Measure first: what re-renders, and how long does it take?',
-            'Mark some updates as non-urgent.',
-            'Do not render 5,000 rows.',
+            'Before changing code: which tool tells you what re-rendered and why, and how long it took?',
+            'How many DOM nodes does a 5,000-row table create on each keystroke? Do you need them all?',
+            'Typing must feel instant; the table can lag slightly. Which React 19 APIs let you mark one update as less urgent?',
+            'Order: profile in a production build → virtualise → `useDeferredValue(text)` + `useMemo` filtered rows (or `useTransition`) → colocate filter state → memo rows / React Compiler → server-side filtering or a Worker.',
           ],
           answer: `**Measure, then fix the biggest cost.** Usually that means rendering too much, rendering too often, or doing urgent and non-urgent work in the same update.
 
@@ -687,10 +995,13 @@ const rows = useMemo(() => filterRows(allRows, deferredText), [deferredText])
           estMinutes: 5,
           roles: ['frontend', 'full-stack'],
           prompt: `**How do you test a React component that fetches data and handles a form submit?** What do you mock, what do you not mock, and where do end-to-end tests fit in?`,
+          intent:
+            'Tests whether your tests give confidence through refactors: user-visible behaviour, mocking only at system edges, and a sensible split between component and end-to-end tests. A strong answer shows a concrete test and covers async and error states.',
           hints: [
-            'Test what the user sees and does, not implementation details.',
-            'Mock at the network boundary.',
-            'Query by role and accessible name.',
+            'If you rename an internal state variable, should a test fail? What should tests observe instead?',
+            'Where is the cleanest seam to fake data for a component that calls `fetch`: the hook, the module, or the network?',
+            'Find elements the way assistive tech does: `getByRole("button", { name: /subscribe/i })`. Await async UI with `findBy`.',
+            'Shape: RTL + user-event + MSW handler per test; cover loading, success, empty, error and validation; unit tests for pure logic; a few Playwright E2E tests for critical flows.',
           ],
           answer: `**Test behaviour through the UI the way a user would, and mock only at the system's edges**, usually the network.
 
@@ -728,6 +1039,238 @@ test('submits the form and shows a confirmation', async () => {
           personalAngle:
             'You have used Jest, Vitest and Playwright. Tie it to the accessibility angle: role-based queries double as an accessibility check, which is something your accessibility-platform background lets you explain convincingly.',
           references: [{ label: 'Testing Library: Guiding principles', url: 'https://testing-library.com/docs/guiding-principles' }],
+        },
+        {
+          id: 'react-compiler-when-memo',
+          title: 'React Compiler: what it does and when manual memo is still needed',
+          type: 'tradeoff',
+          difficulty: 'advanced',
+          priority: 'should',
+          tags: ['react-compiler', 'memoization', 'usememo', 'usecallback', 'rules-of-react', 'performance'],
+          estMinutes: 6,
+          roles: ['frontend', 'full-stack'],
+          prompt: `Your team enables the **React Compiler** on a large codebase. A teammate proposes deleting every \`useMemo\`, \`useCallback\` and \`React.memo\` in the same PR. **What does the compiler actually do, what can break, and where would you still keep or add manual memoisation?**`,
+          intent:
+            'Tests whether you understand the compiler as automatic, build-time memoisation that relies on the rules of React, not as magic. A strong answer explains what it memoises, how it bails out on rule violations, why identity-sensitive code can still need manual control, and how to roll it out safely.',
+          hints: [
+            'The compiler works at build time. What does it need to assume about your components to safely cache their output?',
+            'It memoises JSX, values and callbacks per component at a finer grain than you would by hand. What happens to a component that mutates props or reads a ref during render?',
+            'Which code depends on a value keeping the same identity for correctness, not just speed? Think effect dependencies and third-party libraries.',
+            'Answer shape: "Compiler auto-memoises rule-following code and skips the rest; enable it with the ESLint rules first, roll out incrementally, keep manual memo where identity is semantic (effect deps, external libs), and only delete old memo after profiling."',
+          ],
+          answer: `**The React Compiler is a build-time Babel/SWC plugin that automatically memoises components, hooks, JSX and intermediate values, so code that follows the rules of React re-renders only what actually changed.** Version 1.0 shipped in October 2025 and works with React 17+ (19 natively). It does not change semantics; it caches.
+
+**How it works:** it analyses each component's data flow and inserts fine-grained caching (conceptually a \`useMemo\` around every derived value and JSX subtree, keyed on the exact inputs). That is often *more* precise than hand-written memo, including memoising after an early return, which hooks cannot do.
+
+**What it relies on (the rules of React):** components and hooks are pure during render, props and state are not mutated, refs are not read during render, hooks are called unconditionally. When the compiler detects a violation, it **skips that component** (bail-out) rather than miscompiling it. Code that "worked by accident" (mutating an array and relying on a parent re-render) can behave differently once memoised.
+
+**Rollout:**
+\`\`\`bash
+npm i -D babel-plugin-react-compiler eslint-plugin-react-hooks@latest
+\`\`\`
+- Turn on the compiler-aware lint rules first and fix violations.
+- Enable per directory or with \`compilationMode: 'annotation'\` (\`'use memo'\`), then widen.
+- Use \`'use no memo'\` on a component to opt out while debugging.
+- Verify with React DevTools (the "Memo ✨" badge) and the Profiler.
+
+**Where manual control still matters:**
+- **Effect dependencies where identity is semantic.** If an effect must not re-subscribe, make that explicit rather than depending on compiler output.
+- **Third-party libraries** that compare by identity or keep their own caches (chart libs, some form or table libraries).
+- **Expensive work you want shared across components** (that is a cache or a store, not memo).
+- **Code the compiler bails out on**, until it is fixed.
+
+**About the PR:** do not delete existing memo in the same change. The compiler keeps working with it. Remove it later, behind profiling, in small steps.`,
+          keyPoints: [
+            'Build-time automatic memoisation of components, values and JSX',
+            'Depends on the rules of React; bails out on violations instead of miscompiling',
+            'Roll out with the lint rules, incrementally, with opt-out directives',
+            'Manual memo still useful where identity is semantic or for external libraries',
+            'Do not mass-delete memo in the enabling PR; profile first',
+          ],
+          pitfalls: [
+            '"The compiler makes performance work unnecessary" (it does not virtualise lists or fix slow algorithms)',
+            'Assuming it fixes code that mutates props or state',
+            'Enabling it app-wide without the lint rules and a profiling baseline',
+          ],
+          followUps: [
+            'How would you verify a component is compiled?',
+            'Does the compiler replace useDeferredValue or virtualisation?',
+          ],
+          walkthrough: [
+            {
+              title: 'Say what it is',
+              body: `A **build-time** plugin that memoises components, values and JSX automatically. It does not change what your code means; it adds caching so unchanged inputs skip work. v1.0, October 2025.`,
+            },
+            {
+              title: 'Explain the contract it depends on',
+              body: `It assumes the **rules of React**: pure render, no mutation of props/state, no ref reads during render, unconditional hooks. If it cannot prove a component is safe, it **skips** it. Code that relied on accidental re-renders (mutate then re-render) is what can change behaviour.`,
+            },
+            {
+              title: 'Roll it out safely',
+              body: `1. Enable the compiler-aware \`eslint-plugin-react-hooks\` rules and fix violations.
+2. Turn the compiler on for one area (or annotation mode with \`'use memo'\`).
+3. Check DevTools for the "Memo ✨" badge and profile before and after.
+4. Opt out a component with \`'use no memo'\` while debugging.`,
+            },
+            {
+              title: 'Keep manual memo where identity matters',
+              body: `- Effect deps where re-running is a correctness issue (subscriptions, sockets).
+- Libraries that compare props by identity.
+- Bail-out components until fixed.
+And the compiler does **not** virtualise lists, fix O(n²) work or split bundles.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"The compiler auto-memoises rule-following code at build time and skips components that break the rules. I'd enable the lint rules first, roll it out incrementally and verify with DevTools. I wouldn't delete existing memo in the same PR: it's harmless, and I'd keep manual memo where identity is semantic, like effect dependencies or identity-sensitive libraries."`,
+            },
+          ],
+          references: [{ label: 'react.dev: React Compiler', url: 'https://react.dev/learn/react-compiler' }],
+        },
+        {
+          id: 'react-server-action-form',
+          title: 'Build a form with Server Actions, useActionState and useOptimistic',
+          type: 'coding',
+          difficulty: 'advanced',
+          priority: 'must',
+          tags: ['server-actions', 'useactionstate', 'useoptimistic', 'useformstatus', 'forms', 'react-19'],
+          estMinutes: 20,
+          roles: ['frontend', 'full-stack'],
+          prompt: `Using React 19 (in a Next.js App Router app), build an **"add comment" form**: it submits through a **Server Action**, validates on the server, shows field errors, disables the button while pending, and shows the new comment **optimistically** before the server confirms. Keep it working without JavaScript where possible.`,
+          intent:
+            'Tests whether you can use the React 19 form primitives end to end: a server function as the form action, useActionState for result/error state, useFormStatus or isPending for pending UI, and useOptimistic for instant feedback. A strong answer validates and authorises on the server and explains progressive enhancement and rollback.',
+          hints: [
+            'Start on the server: a `\'use server\'` function that receives `FormData`, validates it, writes, and returns a result object. What should it return on a validation error?',
+            '`useActionState(action, initialState)` returns `[state, formAction, isPending]`. The action signature becomes `(prevState, formData) => newState`.',
+            'Optimistic UI: `const [optimistic, addOptimistic] = useOptimistic(comments, (list, c) => [...list, c])`, called inside the action before awaiting the server.',
+            'Skeleton: `<form action={formAction}>` + `name` attributes + server-side zod validation + `revalidatePath` on success + `state.errors?.body` rendered under the field + `<button disabled={isPending}>`.',
+          ],
+          answer: `**Put the mutation in a Server Action, drive the form with \`useActionState\`, and layer \`useOptimistic\` on top for instant feedback.** Validation and authorisation live on the server because the action is a public endpoint.
+
+\`\`\`ts
+// app/posts/[id]/actions.ts
+'use server'
+import { z } from 'zod'
+import { revalidatePath } from 'next/cache'
+
+const Schema = z.object({ postId: z.string(), body: z.string().trim().min(1).max(500) })
+export type CommentState = { ok: boolean; errors?: { body?: string[] }; message?: string }
+
+export async function addComment(_prev: CommentState, formData: FormData): Promise<CommentState> {
+  const user = await getSessionUser()
+  if (!user) return { ok: false, message: 'Please sign in.' }
+  const parsed = Schema.safeParse(Object.fromEntries(formData))
+  if (!parsed.success) return { ok: false, errors: parsed.error.flatten().fieldErrors }
+  await db.comment.create({ data: { ...parsed.data, authorId: user.id } })
+  revalidatePath(\`/posts/\${parsed.data.postId}\`)
+  return { ok: true }
+}
+\`\`\`
+
+\`\`\`tsx
+// comment-form.tsx
+'use client'
+import { useActionState, useOptimistic, startTransition } from 'react'
+import { addComment, type CommentState } from './actions'
+
+export function Comments({ postId, comments }: { postId: string; comments: Comment[] }) {
+  const [optimistic, addOptimistic] = useOptimistic(comments, (list, c: Comment) => [...list, c])
+  const [state, formAction, isPending] = useActionState<CommentState, FormData>(
+    async (prev, fd) => {
+      addOptimistic({ id: 'tmp', body: String(fd.get('body')), pending: true })
+      return addComment(prev, fd)
+    },
+    { ok: false },
+  )
+
+  return (
+    <>
+      <ul>{optimistic.map((c) => <li key={c.id} aria-busy={c.pending}>{c.body}</li>)}</ul>
+      <form action={formAction}>
+        <input type="hidden" name="postId" value={postId} />
+        <label htmlFor="body">Comment</label>
+        <textarea id="body" name="body" aria-describedby="body-err" />
+        {state.errors?.body && <p id="body-err" role="alert">{state.errors.body[0]}</p>}
+        <button disabled={isPending}>{isPending ? 'Posting…' : 'Post'}</button>
+      </form>
+    </>
+  )
+}
+\`\`\`
+
+**Why each piece:**
+- **\`useActionState\`** holds the action's last return value (errors, messages) and gives \`isPending\`. React runs the action in a transition; the form resets on success.
+- **\`useOptimistic\`** shows a temporary state only while the action is pending. When it settles, React swaps back to the real \`comments\` prop, which is fresh because of \`revalidatePath\`. On failure the optimistic item simply disappears (automatic rollback); show \`state.message\`.
+- **\`useFormStatus\`** is the alternative for a reusable \`<SubmitButton>\` that reads the parent form's pending state.
+- **Progressive enhancement:** passing the Server Action itself to \`action\` lets the form post before hydration. Wrapping it in a client closure (as above for optimism) needs JS; for full no-JS support pass \`addComment\` directly and add the optimistic layer as an enhancement.`,
+          keyPoints: [
+            'Server Action receives FormData; validate and authorise inside it',
+            'useActionState: (prev, formData) => state, plus isPending',
+            'useOptimistic: temporary state during the transition, auto rollback',
+            'revalidatePath / revalidateTag so the real data replaces the optimistic item',
+            'Accessible errors (aria-describedby, role=alert) and progressive enhancement',
+          ],
+          pitfalls: [
+            'Trusting client-side validation only',
+            'Forgetting `name` attributes, so FormData is empty',
+            'Keeping optimistic items in useState and never reconciling them with server data',
+            'Using onSubmit + preventDefault + fetch, losing progressive enhancement',
+          ],
+          followUps: [
+            'How would you handle a duplicate submit or idempotency?',
+            'How is useFormStatus different from isPending?',
+            'How do you test a Server Action?',
+          ],
+          walkthrough: [
+            {
+              title: 'Clarify the flow',
+              body: `Submit → server validates and writes → UI shows errors or the new comment. Requirements: pending state, field errors, optimistic insert, works before hydration where possible. Name the primitives: **Server Action**, \`useActionState\`, \`useOptimistic\`, \`revalidatePath\`.`,
+            },
+            {
+              title: 'Write the Server Action first',
+              body: `\`\`\`ts
+'use server'
+export async function addComment(_prev: CommentState, fd: FormData): Promise<CommentState> {
+  const user = await getSessionUser()
+  if (!user) return { ok: false, message: 'Please sign in.' }
+  const parsed = Schema.safeParse(Object.fromEntries(fd))
+  if (!parsed.success) return { ok: false, errors: parsed.error.flatten().fieldErrors }
+  await db.comment.create({ data: { ...parsed.data, authorId: user.id } })
+  revalidatePath(\`/posts/\${parsed.data.postId}\`)
+  return { ok: true }
+}
+\`\`\`
+Return expected errors as data; throw only for unexpected failures (an error boundary catches those).`,
+            },
+            {
+              title: 'Wire the client form',
+              body: `\`\`\`tsx
+const [optimistic, addOptimistic] = useOptimistic(comments, (l, c) => [...l, c])
+const [state, formAction, isPending] = useActionState(async (prev, fd) => {
+  addOptimistic({ id: 'tmp', body: String(fd.get('body')), pending: true })
+  return addComment(prev, fd)
+}, { ok: false })
+// <form action={formAction}> ... <button disabled={isPending}>
+\`\`\`
+Render \`state.errors?.body\` linked with \`aria-describedby\`.`,
+            },
+            {
+              title: 'Edge cases and trade-offs',
+              body: `- **Rollback** is automatic: optimistic state ends with the transition; show \`state.message\` on failure.
+- **Double submit:** \`disabled={isPending}\`, plus server idempotency if it matters.
+- **No-JS:** pass the Server Action directly to \`action\` for full progressive enhancement; the optimistic wrapper is an enhancement.
+- **Security:** the action is a POST endpoint: auth, validation, rate limits.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"The mutation is a Server Action that authorises, validates with zod, writes and revalidates the path, returning field errors as data. On the client, useActionState gives me the last result and isPending, and useOptimistic shows the comment immediately and rolls back automatically if the action fails. The form uses the action prop, so it can post before hydration."`,
+            },
+          ],
+          personalAngle:
+            'Consent and accessibility settings forms are a natural example: explain how you would move a settings save to a server action with optimistic toggles and server-side validation.',
+          references: [
+            { label: 'react.dev: useActionState', url: 'https://react.dev/reference/react/useActionState' },
+            { label: 'react.dev: useOptimistic', url: 'https://react.dev/reference/react/useOptimistic' },
+          ],
         },
       ],
     },

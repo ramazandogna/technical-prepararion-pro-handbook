@@ -25,10 +25,44 @@ const track: Track = {
           estMinutes: 4,
           roles: ['frontend', 'full-stack'],
           prompt: `**Why does the Composition API exist, and when (if ever) would you still choose the Options API?**`,
+          intent:
+            'Tests whether you understand the design problems the Composition API solves (scattered concerns, mixins, weak typing) rather than just preferring it. A strong answer names concrete benefits, shows a composable, and gives an honest case for the Options API.',
           hints: [
-            'Think about organising code by logical concern rather than by option type.',
-            'How did you reuse logic before composables?',
-            'TypeScript inference.',
+            'In an Options API component, where does the code for one feature (say "search") live: in one place, or across `data`, `computed`, `watch` and `methods`?',
+            'Before composables, how did Vue 2 apps share logic between components, and what went wrong with it (naming collisions, "where did `this.foo` come from?")?',
+            'Think about TypeScript: what is harder to type, `this` inside an options object or plain variables and functions?',
+            'Answer shape: "Organise by concern, reuse through composables instead of mixins, better TS inference, leaner compiled output; Options is still supported and fine for legacy code or very simple components."',
+          ],
+          walkthrough: [
+            {
+              title: 'Name the problem it solves',
+              body: `The Options API groups code by **option type**, so one feature is scattered across \`data\`, \`computed\`, \`watch\` and \`methods\`, and logic reuse relied on **mixins**. The Composition API groups by **logical concern** and reuses logic through **composables**.`,
+            },
+            {
+              title: 'List the concrete benefits',
+              body: `- **Colocation:** a feature's state, computed values and handlers sit together and can be extracted to \`useX()\` unchanged.
+- **Reuse without mixins:** explicit inputs and outputs, no name collisions, clear origin.
+- **TypeScript:** \`defineProps<Props>()\`, \`defineEmits\`, plain variables infer naturally.
+- **Output:** \`<script setup>\` compiles into the render function's scope and minifies better.`,
+            },
+            {
+              title: 'Show a composable in use',
+              body: `\`\`\`html
+<script setup lang="ts">
+const { initialQuery = '' } = defineProps<{ initialQuery?: string }>() // 3.5 reactive destructure
+const { query, results, loading } = useSearch(() => initialQuery)
+</script>
+\`\`\`
+The getter keeps the destructured prop reactive when passed into the composable.`,
+            },
+            {
+              title: 'Be fair to the Options API',
+              body: `It is **not deprecated**; it is implemented on top of the Composition API. Reasonable for existing Options codebases, very small components, or teams new to Vue. Both can be mixed during a migration. The cost of Composition is freedom: without conventions, \`setup\` becomes one long function.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"The Composition API lets me organise code by feature and extract it into composables, which replaced mixins and their collisions. It types far better and \`<script setup>\` compiles to leaner code. I'd still accept Options in a legacy codebase or a trivial component, since it's fully supported, but for a library like REI-KIT, composables are what keep behaviour consistent."`,
+            },
           ],
           answer: `**The Composition API organises code by logical concern and makes logic reusable through composables, with first-class TypeScript inference.** The Options API groups code by *option type* (\`data\`, \`methods\`, \`computed\`, \`watch\`), so one feature is spread across the whole component.
 
@@ -71,10 +105,43 @@ const { query, results, loading } = useSearch(() => props.initialQuery ?? '')
           estMinutes: 7,
           roles: ['frontend', 'full-stack'],
           prompt: `**Explain how Vue 3's reactivity system works under the hood.** What is the difference between \`ref\` and \`reactive\`, and when is a ref automatically unwrapped?`,
+          intent:
+            'Tests whether you can explain dependency tracking mechanically (effects, track on get, trigger on set, batched scheduling) and the practical ref/reactive rules that follow. A strong answer covers Proxy vs defineProperty, unwrapping rules, and escape hatches like shallowRef and markRaw.',
           hints: [
-            'Tracking happens on property reads; triggering happens on writes.',
-            'reactive() returns a Proxy. What is a ref?',
-            'Vue 2 used Object.defineProperty, which had limitations.',
+            'Vue needs to know which effects (render functions, computed values, watchers) depend on which properties. When is the cheapest moment to record that?',
+            'A Proxy `get` trap records "the running effect depends on target.key" (`track`); the `set` trap re-runs those effects (`trigger`). Why can a Proxy not wrap the number `0`?',
+            '`ref` is an object with a `.value` getter/setter doing the same track/trigger, so primitives and reassignable values work. Where does Vue unwrap refs for you, and where not?',
+            'Shape: "Proxy get → track, set → trigger; updates are batched and flushed in a microtask (nextTick); ref for any value, reactive for objects; unwrapped in templates and reactive properties, not in arrays or Maps; shallowRef/markRaw for big or foreign objects."',
+          ],
+          walkthrough: [
+            {
+              title: 'Start with the core idea',
+              body: `Vue records **which reactive properties an effect reads**, and **re-runs that effect when one of them is written**. Effects are component render functions, \`computed\` getters and watchers.`,
+            },
+            {
+              title: 'Explain track and trigger',
+              body: `\`reactive(obj)\` returns a **Proxy**:
+\`\`\`ts
+get(target, key)  { track(target, key);   return Reflect.get(target, key) }
+set(target, key, v) { Reflect.set(target, key, v); trigger(target, key) }
+\`\`\`
+\`track\` links the active effect to \`target.key\`; \`trigger\` schedules every linked effect. Component updates are **queued and flushed in a microtask**, hence \`await nextTick()\` before reading the DOM. Vue 3.5 reworked this internally (version counters, linked lists) for much lower memory use, with no API change.`,
+            },
+            {
+              title: 'ref vs reactive',
+              body: `- \`ref\` wraps any value behind \`.value\` (primitives cannot be proxied); objects inside become reactive. Reassigning \`.value\` is reactive.
+- \`reactive\` works only on objects; **destructuring or replacing the variable loses reactivity**.
+- Vue recommends \`ref\` as the default.
+- Unwrapping: top-level refs in templates and refs nested in a reactive object; **not** inside reactive arrays or \`Map\`/\`Set\`.`,
+            },
+            {
+              title: 'History and escape hatches',
+              body: `Vue 2's \`Object.defineProperty\` could not see added/deleted keys or array index writes (hence \`Vue.set\`); Proxy intercepts all of these, plus \`Map\`/\`Set\`. For performance: \`shallowRef\`/\`shallowReactive\` for large immutable data, \`markRaw\` for third-party instances (chart, map), \`toRaw\` to read the original.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"reactive returns a Proxy: reads call track, which links the running effect to that key, and writes call trigger, which queues those effects; DOM updates are batched until nextTick. ref is a .value accessor doing the same, so it works for primitives and reassignment, which is why it's the default. Refs unwrap in templates and inside reactive objects but not in arrays or Maps, and I use shallowRef or markRaw for big or foreign objects."`,
+            },
           ],
           answer: `**Vue tracks which reactive properties an *effect* reads, and re-runs that effect when one of them is written.** The effects are component render functions, \`computed\` values and watchers.
 
@@ -149,10 +216,46 @@ async function load() {
   <li v-for="item in state.items" :key="item">{{ item }}</li>
 </template>`,
           },
+          intent:
+            'Tests whether you know the three classic ways reactivity is lost and why each happens at the Proxy level. A strong answer fixes each bug with the right tool (toRefs, getter source, mutate or use ref) and generalises to composable inputs and 3.5 props destructuring.',
           hints: [
-            'What does destructuring a property out of a Proxy give you?',
-            'watch needs a source it can track. What is state.count at call time?',
-            'The template captured the original proxy object.',
+            'Reactivity lives in the Proxy. Each bug is a place where the code stops going through the Proxy. Where does that happen?',
+            '`const { count } = state` performs one read and stores a number. `watch(state.count, ...)` also evaluates `state.count` once. What does `watch` actually receive?',
+            'The template was compiled against the first `state` proxy. Reassigning the `let` variable to a new proxy notifies nobody.',
+            'Fixes: `toRefs(state)` (or use `state.count`), `watch(() => state.count, cb)`, and `state.items = items` (or switch to `const items = ref<string[]>([])` and assign `.value`).',
+          ],
+          walkthrough: [
+            {
+              title: 'Find where the Proxy is bypassed',
+              body: `Vue only sees reads and writes that go **through the reactive proxy**. Each symptom is a spot where the code reads a plain value or swaps the proxy out.`,
+            },
+            {
+              title: 'Bugs 1 and 2: plain values',
+              body: `- \`const { count } = state\` reads once → a plain \`0\`. Fix: \`const { count } = toRefs(state)\` or use \`state.count\` in the template.
+- \`watch(state.count, cb)\` passes the number \`0\`; Vue warns "Invalid watch source". Fix: a getter.
+\`\`\`ts
+watch(() => state.count, (n) => console.log('count is', n))
+\`\`\``,
+            },
+            {
+              title: 'Bug 3: replacing the proxy',
+              body: `The template is bound to the **original** proxy; \`state = reactive({...})\` creates a new one nobody watches. Mutate instead, or model with refs:
+\`\`\`ts
+const items = ref<string[]>([])
+async function load() { items.value = await fetchItems() } // replacing .value is reactive
+\`\`\`
+A \`let\` around a reactive object is a code smell.`,
+            },
+            {
+              title: 'Generalise the rule',
+              body: `- Passing \`state.count\` into a composable passes a number; pass a ref or getter and read it with \`toValue()\`.
+- Vue 3.5 **reactive props destructure**: \`const { size = 'md' } = defineProps<...>()\` compiles to \`props.size\`, but to pass \`size\` into \`watch\` or a composable, wrap it: \`() => size\`.
+- \`deep: true\` does not fix watching a primitive.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"All three bugs bypass the proxy. Destructuring reads a plain number, so I use toRefs. watch received a number, so I pass a getter. And replacing the reactive object leaves the template bound to the old proxy, so I mutate it or, better, use refs where replacing .value is reactive. Same rule for composables: pass refs or getters, read with toValue."`,
+            },
           ],
           answer: `**Bug 1: destructuring breaks reactivity.** \`const { count } = state\` reads the property **once** and stores the plain number 0. The template shows that constant.
 - Fix: use \`state.count\` in the template, or \`const { count } = toRefs(state)\` (or \`toRef(state, 'count')\`), which creates refs linked to the proxy.
@@ -202,10 +305,47 @@ async function load() {
           estMinutes: 6,
           roles: ['frontend', 'full-stack'],
           prompt: `**When do you use \`computed\`, \`watch\` and \`watchEffect\`?** Give an example of each, and explain cleanup and flush timing.`,
+          intent:
+            'Tests whether you separate derivation from side effects and understand how each watcher tracks dependencies and when it runs. A strong answer gives an example of each, explains cleanup for async work, flush timing, and the after-await tracking trap.',
           hints: [
-            'One is for deriving values, the others for side effects.',
-            'watch: explicit sources and old and new values. watchEffect: automatic tracking.',
-            'Vue 3.5 added onWatcherCleanup.',
+            'Split the three into two groups: one produces a value, the other two perform side effects. Which is which?',
+            '`watch` has explicit sources, is lazy by default and gives you new and old values. `watchEffect` runs immediately and tracks whatever it reads. What does "reads" miss in an async function?',
+            'For an async watcher that fetches, how do you cancel the previous run when the source changes again? (Vue 3.5 added a function for this.)',
+            'Shape: "computed = pure cached derivation; watch(() => route.params.id, fetch, { immediate: true }) with onWatcherCleanup(() => ctrl.abort()) before the first await; watchEffect for obvious sync deps like document.title; flush pre/post/sync."',
+          ],
+          walkthrough: [
+            {
+              title: 'Group them: derive vs side effect',
+              body: `**\`computed\` derives a value** (pure, cached, lazy). **\`watch\` and \`watchEffect\` perform side effects** (fetch, log, touch the DOM, persist). If a watcher only writes state that mirrors other state, it should be a \`computed\`.`,
+            },
+            {
+              title: 'Example of each',
+              body: `\`\`\`ts
+const visible = computed(() => todos.value.filter((t) => !t.done))
+
+watch(() => route.params.id, async (id) => {
+  const c = new AbortController()
+  onWatcherCleanup(() => c.abort()) // 3.5; register before the first await
+  user.value = await fetchUser(String(id), c.signal)
+}, { immediate: true })
+
+watchEffect(() => { document.title = \`\${unread.value} unread\` })
+\`\`\``,
+            },
+            {
+              title: 'Tracking and timing details',
+              body: `- \`watch\`: explicit sources, lazy unless \`immediate\`, old/new values, \`deep\` (a number in 3.5), \`once\`.
+- \`watchEffect\`: immediate, auto-tracks **synchronous** reads only; anything read after \`await\` is not tracked.
+- \`flush: 'pre'\` (default, before re-render), \`'post'\` (after DOM update, for measuring), \`'sync'\` (rare, expensive).`,
+            },
+            {
+              title: 'Lifetime and cleanup',
+              body: `Watchers created synchronously in \`setup\` stop on unmount. Ones created after an \`await\` or outside components must be stopped with the returned handle (3.5 adds \`pause()\`/\`resume()\`) or grouped in an \`effectScope\`. Cleanups run before the next run and on stop.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"computed is for derived values: pure and cached. watch is for side effects when I want explicit sources and old and new values, like refetching when a route param changes, with onWatcherCleanup to abort the previous request. watchEffect is convenient for side effects with obvious synchronous dependencies, but it doesn't track reads after an await. I use flush 'post' when I need the updated DOM."`,
+            },
           ],
           answer: `**\`computed\` derives a value; watchers perform side effects.** If you are setting state inside a watcher just to mirror other state, you probably want \`computed\`.
 
@@ -289,7 +429,14 @@ The catch: anything read **after an \`await\`** is not tracked, and dependencies
               explanation: 'setup runs before the component is mounted, so there is no DOM yet.',
             },
           ],
-          hints: ['When does Vue apply DOM updates after a state change?'],
+          intent:
+            'Tests whether you know Vue batches DOM updates asynchronously and where the DOM exists in the lifecycle. A strong answer picks nextTick plus a template ref and explains why the other options fail, including the SSR implication.',
+          hints: [
+            'When you set a ref, does Vue patch the DOM synchronously, or later?',
+            'Vue queues component updates and flushes them in a microtask. Is there a promise you can await that resolves after that flush?',
+            'Does the DOM exist during `setup` or `onBeforeMount`? And would they run again after a later state change anyway?',
+            'Answer: b. `show.value = true; await nextTick(); input.value?.focus()` with `const input = useTemplateRef<HTMLInputElement>("search")`.',
+          ],
           answer: `**Set the state, \`await nextTick()\`, then use the template ref.** Vue batches DOM updates and flushes them in a microtask. \`nextTick\` resolves after that flush.
 
 \`\`\`ts
@@ -338,10 +485,52 @@ Hooks must be registered **synchronously** during \`setup\`, not after an \`awai
           estMinutes: 6,
           roles: ['frontend', 'full-stack'],
           prompt: `You are designing a reusable \`<DataTable>\` for a component library. **How do you design its API with props, emits, \`v-model\` and slots?** Explain one-way data flow, \`defineModel\` and scoped slots.`,
+          intent:
+            'Tests whether you can design a component library API: clear data ownership, typed contracts, and customisation through slots instead of prop explosion. A strong answer shows defineProps/defineModel/defineEmits/scoped slots in code and explains one-way data flow, including deep prop mutation.',
           hints: [
-            'Data goes down through props and events go up.',
-            'defineModel removes the props-plus-emit boilerplate for v-model.',
-            'Scoped slots let the parent render each row using the child\'s data.',
+            'Who owns the rows, the selection and the sort state: the table, or the page using it? How does each direction of data travel?',
+            '`v-model:selected` is sugar for a prop plus an `update:selected` event. Which macro gives the child a ref that does both?',
+            'The consumer wants a status badge in one column and a link in another. Would you add props for each, or let the parent render cells with the row data?',
+            'Shape: `generic="Row extends { id: string | number }"`, `defineProps<{ rows: Row[]; columns: ... }>()`, `defineModel("selected")`, `defineEmits<{ rowClick: [row: Row] }>()`, a per-column scoped slot (`cell-<key>`) exposing `row` and `value` with a default, plus an `#empty` slot.',
+          ],
+          walkthrough: [
+            {
+              title: 'Set the ownership rule',
+              body: `**Props down, events up, slots for customisation.** The consumer owns data (\`rows\`) and controlled state (\`selected\`, \`sort\`); the table renders and reports intent. A child never mutates props, **including deep mutation of an object prop**, which Vue does not warn about.`,
+            },
+            {
+              title: 'Type the contract',
+              body: `\`\`\`html
+<script setup lang="ts" generic="Row extends { id: string | number }">
+const props = defineProps<{ rows: Row[]; columns: { key: keyof Row & string; label: string }[]; loading?: boolean }>()
+const selected = defineModel<Row['id'][]>('selected', { default: () => [] })
+const emit = defineEmits<{ rowClick: [row: Row] }>()
+</script>
+\`\`\`
+\`defineModel\` returns a ref: reading it reads the prop, assigning it emits \`update:selected\`. With a default it works uncontrolled too.`,
+            },
+            {
+              title: 'Use scoped slots for flexibility',
+              body: `\`\`\`html
+<td v-for="c in props.columns" :key="c.key">
+  <slot :name="\`cell-\${c.key}\`" :row="row" :value="row[c.key]">{{ row[c.key] }}</slot>
+</td>
+<!-- consumer -->
+<template #cell-status="{ value }"><Badge :tone="value" /></template>
+\`\`\`
+Type slots with \`defineSlots\`. One slot replaces a dozen formatting props.`,
+            },
+            {
+              title: 'Library-level details',
+              body: `- Declare every emit (undeclared listeners fall through as attributes).
+- Decide \`inheritAttrs\` and where \`$attrs\` go (root \`<table>\` or a wrapper).
+- Accessibility: real table semantics, \`aria-sort\` on sortable headers, keyboard-operable row actions.
+- Keep the API small; add props only for behaviour, not presentation.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"Props down, events up: the table never mutates rows, even deeply. Controlled state like selection and sort goes through defineModel so it works with v-model or uncontrolled with a default. Rendering flexibility comes from scoped slots per cell plus an empty slot, instead of many props. Everything is typed with a generic Row, and the table ships with aria-sort and proper semantics."`,
+            },
           ],
           answer: `**Props down, events up, and slots for anything the consumer should be able to customise.** A good library API is small, typed and predictable.
 
@@ -408,10 +597,13 @@ const emit = defineEmits<{ rowClick: [row: Row] }>()
           estMinutes: 4,
           roles: ['frontend', 'full-stack'],
           prompt: `**When would you use \`provide\`/\`inject\` instead of props or Pinia?** How do you type it and keep it reactive?`,
+          intent:
+            'Tests whether you can pick the right sharing mechanism by scope (props, provide/inject, Pinia) and use injection safely. A strong answer shows a typed InjectionKey, provides readonly refs plus mutators, and handles a missing provider.',
           hints: [
-            'Think about prop drilling, and about compound components such as Tabs and Tab.',
-            'InjectionKey<T> gives typing.',
-            'Provide refs, plus functions for changing them.',
+            'Think of `<Tabs>` and `<Tab>`: the tab needs the active id, but the user places tabs anywhere inside. Are props practical here?',
+            'How do you make `inject()` return a typed value instead of `unknown`, and avoid collisions between libraries?',
+            'If you provide `active.value` (a string), what happens when it changes? And who should be allowed to change it?',
+            'Shape: `export const TabsKey: InjectionKey<{ active: Readonly<Ref<string>>; select(id: string): void }> = Symbol("Tabs")`; `provide(TabsKey, { active: readonly(active), select })`; `inject(TabsKey)` and throw if missing.',
           ],
           answer: `**Use \`provide\`/\`inject\` for a subtree-scoped dependency.** It avoids prop drilling in **compound components** (\`<Tabs>\` and \`<Tab>\`, \`<Form>\` and \`<Field>\`, \`<Accordion>\`), and it is a way to inject services or configuration (a theme, a library-wide config, an API client) without making them global.
 
@@ -469,10 +661,59 @@ Compared with React context, injected **refs update consumers in a fine-grained 
           estMinutes: 20,
           roles: ['frontend', 'full-stack'],
           prompt: `Write \`useFetch<T>(url)\`. \`url\` may be a string, a ref or a getter. The composable re-fetches when the URL changes, cancels stale requests, and returns \`{ data, error, loading, refresh }\`. What makes a composable well designed?`,
+          intent:
+            'Tests whether you can write a composable that handles flexible reactive inputs, cancellation and cleanup, and returns a destructurable API. A strong answer writes working code and states the design rules, including SSR behaviour in Nuxt.',
           hints: [
-            'Accept MaybeRefOrGetter<string> and read it with toValue().',
-            'Use watch on a getter with immediate: true, and onCleanup to abort.',
-            'Return refs, not a reactive object, so callers can destructure.',
+            'The input may be a string, a ref or a getter. Which Vue 3.3+ type and helper normalise all three?',
+            'You need to re-run when the URL changes and also on first use. Which watcher setup gives you both, plus a hook to cancel the previous run?',
+            'How do you implement `refresh()` when the URL has not changed? Think of a counter that is also a watch source.',
+            'Skeleton: `watch([() => toValue(url), version], async ([u], _o, onCleanup) => { const c = new AbortController(); onCleanup(() => c.abort()); ... }, { immediate: true })`; return `{ data, error, loading, refresh: () => version.value++ }` as refs.',
+          ],
+          walkthrough: [
+            {
+              title: 'Clarify the contract',
+              body: `Input: \`MaybeRefOrGetter<string>\`. Output: refs \`{ data, error, loading, refresh }\`. Behaviour: fetch immediately, refetch on URL change or \`refresh()\`, never let a stale response win, clean up on unmount.`,
+            },
+            {
+              title: 'Normalise input and watch it',
+              body: `\`toValue(url)\` reads a string, ref or getter uniformly. Watch a getter plus a \`version\` counter:
+\`\`\`ts
+const version = ref(0)
+watch([() => toValue(url), version], run, { immediate: true })
+\`\`\`
+\`immediate\` gives the first fetch; \`version.value++\` gives \`refresh\`.`,
+            },
+            {
+              title: 'Write the fetch with cancellation',
+              body: `\`\`\`ts
+async ([u], _old, onCleanup) => {
+  const c = new AbortController()
+  onCleanup(() => c.abort()) // next run or unmount
+  loading.value = true; error.value = null
+  try {
+    const res = await fetch(u, { signal: c.signal })
+    if (!res.ok) throw new Error(\`HTTP \${res.status}\`)
+    data.value = (await res.json()) as T
+  } catch (e) {
+    if ((e as Error).name !== 'AbortError') error.value = e as Error
+  } finally {
+    if (!c.signal.aborted) loading.value = false
+  }
+}
+\`\`\`
+Use \`shallowRef\` for \`data\`: payloads are replaced, not deeply mutated.`,
+            },
+            {
+              title: 'Design rules and SSR',
+              body: `- Return **an object of refs** so callers can destructure.
+- One concern per composable, called synchronously in \`setup\`; outside components use \`effectScope\`/\`onScopeDispose\`.
+- This fetches on the client only. In **Nuxt**, use \`useFetch\`/\`useAsyncData\`, which fetch on the server and reuse the payload during hydration.
+- For shared caching, Pinia Colada or TanStack Query.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"I accept MaybeRefOrGetter and read it with toValue, watch that getter plus a version counter with immediate true, and create an AbortController per run that onCleanup aborts, so stale responses never land and unmount cleans up. I return refs, use shallowRef for the payload, and in Nuxt I'd use its useFetch to avoid double fetching on hydration."`,
+            },
           ],
           answer: `\`\`\`ts
 import { ref, shallowRef, toValue, watch, type MaybeRefOrGetter } from 'vue'
@@ -550,10 +791,13 @@ For production apps, Pinia Colada or TanStack Query for Vue add caching, dedupli
           estMinutes: 5,
           roles: ['frontend', 'full-stack'],
           prompt: `**How do you protect authenticated routes and keep the initial bundle small with Vue Router?** Explain the guard types and lazy-loaded routes, and what happens when only the params change.`,
+          intent:
+            'Tests whether you can structure routing for auth and performance and know the instance-reuse trap. A strong answer uses route meta plus a global guard returning a redirect, lazy imports, handles param changes, and states that client guards are UX, not security.',
           hints: [
-            'There are global, per-route and in-component guards.',
-            'Use route meta for requirements.',
-            'Navigating from /users/1 to /users/2 reuses the same component instance.',
+            'Where would you declare "this route needs login" so you do not repeat the check in every component?',
+            'In Vue Router 4, a guard can return a value instead of calling `next()`. What do `false`, `undefined` and a route location each mean?',
+            'From `/users/1` to `/users/2`, is the component unmounted and remounted? Does `onMounted` run again?',
+            'Shape: `meta: { requiresAuth: true }` + `beforeEach(to => !auth.isLoggedIn && to.meta.requiresAuth ? { path: "/login", query: { redirect: to.fullPath } } : undefined)`; `component: () => import(...)`; `watch(() => route.params.id, load, { immediate: true })`; server still authorises.',
           ],
           answer: `**Declare requirements in route \`meta\`, enforce them in a global \`beforeEach\` guard, and lazy-load route components with dynamic imports.**
 
@@ -610,10 +854,13 @@ Type \`meta\` by augmenting \`RouteMeta\` with \`declare module 'vue-router'\`.
           estMinutes: 6,
           roles: ['frontend', 'full-stack'],
           prompt: `**When do you put state in a Pinia store, and when in a composable or a component?** How do you structure a medium-sized Vue app, and what Pinia pitfalls should you know?`,
+          intent:
+            'Tests whether you can place state by ownership and scope, and know what Pinia adds beyond a module-level ref, especially for SSR. A strong answer gives a clear rule, a setup-store example with storeToRefs, the common pitfalls, and a feature-based structure.',
           hints: [
-            'A composable with state at module level is also "global". What does Pinia add?',
-            'Destructuring a store.',
-            'Organise by feature, not by file type.',
+            'Classify state: local to one component, logic reused but per caller, or shared across distant pages. Which tool fits each?',
+            'A `ref` exported from a module is also "global". On an SSR server handling many users, what is wrong with that?',
+            'What happens to reactivity when you write `const { dailyGoal } = useSettingsStore()`?',
+            'Shape: "Component state by default; composables for reusable per-caller logic; Pinia for shared client-owned state (per-request on SSR, devtools, plugins); storeToRefs for state/getters; split by domain; server data in a query cache."',
           ],
           answer: `**Use Pinia for client-owned state shared across distant parts of the app (session, preferences, a cart, cross-page workflows). Use composables for reusable logic whose state belongs to each caller. Use component state for everything local.**
 
@@ -677,10 +924,13 @@ Rules: features depend on \`shared\`, never on each other's internals; API acces
           estMinutes: 6,
           roles: ['frontend', 'full-stack'],
           prompt: `A Vue dashboard with large tables and charts feels slow. **What do you check, and which Vue-specific tools do you use?** Why does Vue usually need less manual memoisation than React?`,
+          intent:
+            'Tests whether you know why Vue rarely needs manual memoisation and which Vue-specific levers actually matter. A strong answer explains per-component tracking and compiler patch flags, then gives a measured checklist (shallowRef/markRaw, virtualisation, stable props, async components, lazy hydration) and positions Vapor Mode correctly.',
           hints: [
-            'Fine-grained reactivity plus a compiler.',
-            'Large data does not need to be deeply reactive.',
-            'Load less and render less.',
+            'When a parent re-renders in Vue, does a child with unchanged props re-render? Compare with React.',
+            'A 10,000-row API payload in `ref()` becomes 10,000 deep proxies. Does chart data need to be deeply reactive?',
+            'Beyond reactivity: how much DOM is rendered, and how much JavaScript is loaded and hydrated upfront?',
+            'Checklist: measure (Vue Devtools, Performance panel) → `shallowRef`/`markRaw` → virtualise → stable props via `computed` → `v-memo`/`v-once`/`KeepAlive` → `defineAsyncComponent` + `hydrateOnVisible()` → Vapor Mode as an opt-in future option.',
           ],
           answer: `**Vue tracks dependencies per component, so only components whose reactive dependencies changed re-render.** Children do not re-render just because a parent did, provided their props have not changed. The **template compiler** also hoists static content and adds *patch flags*, so only dynamic bindings are compared. This is why Vue rarely needs \`memo\`-style hand optimisation. Performance problems usually come from **too much reactive data, too much DOM, or too much JavaScript**.
 
@@ -694,7 +944,7 @@ Rules: features depend on \`shared\`, never on each other's internals; API acces
 7. **Third-party libraries:** mark chart or map instances with \`markRaw\` and update them imperatively, rather than making them reactive.
 8. **SSR or prerendering** for faster first content, and **lazy hydration** (Vue 3.5: \`defineAsyncComponent({ loader, hydrate: hydrateOnVisible() })\`) to reduce hydration cost and improve INP.
 
-**Looking ahead:** *Vapor Mode*, an opt-in compilation strategy without a virtual DOM, is in development for future Vue releases. Mention it as an emerging direction, not something most apps use today.`,
+**Looking ahead: Vapor Mode.** An opt-in compilation strategy (introduced with Vue 3.6, still maturing) that compiles \`<script setup>\` components to direct DOM operations **without a virtual DOM**, similar to Solid. It is enabled per component (\`<script setup vapor>\`) and can be mixed with regular components, giving smaller runtime and faster updates. Mention it as an emerging option for hot paths, not as something most production apps have migrated to.`,
           keyPoints: [
             'Per-component dependency tracking; the compiler hoists static content and adds patch flags',
             'shallowRef and markRaw for big data and third-party instances',
@@ -715,10 +965,13 @@ Rules: features depend on \`shared\`, never on each other's internals; API acces
           estMinutes: 7,
           roles: ['frontend', 'full-stack'],
           prompt: `**Compare SPA, SSR, prerendering (SSG) and hybrid rendering for a Vue app.** How did you, or would you, choose for a course platform like Kakehashi, and what causes hydration problems in Vue?`,
+          intent:
+            'Tests whether you choose rendering modes per route from freshness and personalisation, and understand the hydration and SSR-safety consequences. A strong answer gives a comparison, shows Nuxt routeRules, justifies a concrete choice for a real project, and lists Vue 3.5 hydration tools.',
           hints: [
-            'How fresh is the content, and how personalised?',
-            'Nuxt routeRules lets you choose per route.',
-            'Hydration mismatches in Vue have the same causes as in React.',
+            'For each page ask two questions: how often does the content change, and is it the same for every visitor?',
+            'Must one app use one mode? Nuxt lets you set rendering per route pattern. What is that config called?',
+            'Course pages: public, SEO-relevant, rarely changing. Learner dashboard: personalised. Which mode suits each?',
+            'Shape: table SPA/SSR/SSG/hybrid → `routeRules: { "/": { prerender: true }, "/courses/**": { swr: 3600 }, "/dashboard/**": { ssr: false } }` → useFetch/useAsyncData avoid refetch on hydrate → mismatch causes + `useId`, `data-allow-mismatch`, lazy hydration → per-request state.',
           ],
           answer: `**Choose per route, based on how fresh and how personalised the content is.**
 
@@ -760,6 +1013,202 @@ Use \`useFetch\` or \`useAsyncData\` for data: they run on the server, serialise
           personalAngle:
             'Kakehashi is prerendered and runs on REI-KIT. Be ready to explain why you chose prerendering over SSR, how you handle the personalised parts, and what the prerendered output did for LCP and SEO. Your content and SEO background (2M+ visitors) gives you credibility here.',
           references: [{ label: 'Nuxt: Rendering modes', url: 'https://nuxt.com/docs/guide/concepts/rendering' }],
+        },
+        {
+          id: 'vue-ssr-hydration-debug',
+          title: 'Debug: Vue/Nuxt hydration mismatch',
+          type: 'debugging',
+          difficulty: 'advanced',
+          priority: 'must',
+          tags: ['ssr', 'hydration', 'hydration-mismatch', 'nuxt', 'useid', 'data-allow-mismatch'],
+          estMinutes: 10,
+          roles: ['frontend', 'full-stack'],
+          prompt: `In a Nuxt 3 app this header component logs **"Hydration completed but contains mismatches"** and the theme flickers on load. In production the warning has no detail. **Find the causes, fix them, and explain how you would debug this in production.**`,
+          code: {
+            language: 'html',
+            source: `<script setup lang="ts">
+const theme = localStorage.getItem('theme') ?? 'light'
+const menuId = \`menu-\${Math.random().toString(36).slice(2)}\`
+const greeting = new Date().getHours() < 12 ? 'Good morning' : 'Good afternoon'
+</script>
+
+<template>
+  <header :class="theme">
+    <p>
+      {{ greeting }}
+      <div class="badge">Beta</div>
+    </p>
+    <button :aria-controls="menuId">Menu</button>
+    <nav :id="menuId">...</nav>
+  </header>
+</template>`,
+          },
+          intent:
+            'Tests whether you can reason about what runs on the server vs the client in Vue SSR and fix each mismatch with the right tool instead of disabling SSR. A strong answer finds all four causes, fixes them (cookie/SSR state, useId, client-only time, valid nesting), and knows how to get mismatch details in production.',
+          hints: [
+            'Go line by line through `<script setup>`: which lines run on the server, and would they produce the same value in the browser a moment later?',
+            '`localStorage` does not exist on the server (it actually throws there). `Math.random()` and `new Date()` give different results on each side. One more cause is in the template, not the script.',
+            'A `<div>` inside a `<p>` is invalid HTML: the browser closes the `<p>` early while parsing, so the DOM no longer matches the server vnode tree.',
+            'Fixes: theme from a cookie (`useCookie("theme")`) so the server knows it; `const menuId = useId()`; compute the greeting in `onMounted` or wrap it in `<ClientOnly>` / `data-allow-mismatch="text"`; change `<p>` to `<div>` or `<div class="badge">` to `<span>`.',
+          ],
+          answer: `**Four causes; each one makes the first client render differ from the server HTML.**
+
+1. **\`localStorage\` in \`setup\`:** \`setup\` runs on the server, where \`localStorage\` is undefined (in Nuxt this throws during SSR or is guarded and falls back to \`'light'\`). The client then reads \`'dark'\`, so the \`class\` differs, and the theme flickers.
+2. **\`Math.random()\` id:** a different id on each side; the \`aria-controls\`/\`id\` pair mismatches.
+3. **\`new Date()\`:** server and browser can be in different time zones, and time passes between renders.
+4. **Invalid nesting:** \`<div>\` inside \`<p>\`. The HTML parser auto-closes the \`<p>\`, so the real DOM tree differs from the vnode tree Vue expects.
+
+**Fixes:**
+\`\`\`html
+<script setup lang="ts">
+const theme = useCookie<'light' | 'dark'>('theme', { default: () => 'light' }) // readable on server and client
+const menuId = useId() // Vue 3.5: stable across SSR and hydration
+const greeting = ref('Hello')
+onMounted(() => {
+  greeting.value = new Date().getHours() < 12 ? 'Good morning' : 'Good afternoon'
+})
+</script>
+
+<template>
+  <header :class="theme">
+    <div>
+      {{ greeting }}
+      <span class="badge">Beta</span>
+    </div>
+    <button :aria-controls="menuId">Menu</button>
+    <nav :id="menuId">...</nav>
+  </header>
+</template>
+\`\`\`
+- **Persisted user preferences** that affect the first paint belong in a **cookie** (or server session), not \`localStorage\`, so the server renders the right HTML and nothing flickers.
+- **Client-only values:** set them in \`onMounted\`, wrap in \`<ClientOnly>\` (Nuxt), or, for a single value that is expected to differ, mark it with \`data-allow-mismatch="text"\` (Vue 3.5).
+- **Ids:** \`useId()\` instead of random values or counters.
+
+**Debugging in production:** Vue strips mismatch details from production builds. Enable them with the compile-time flag \`__VUE_PROD_HYDRATION_MISMATCH_DETAILS__: true\` (set through Vite's \`define\`, e.g. \`vite.define\` in \`nuxt.config.ts\`) in a staging build, reproduce with extensions disabled (they inject attributes), and compare **View Source** (server HTML) with the Elements panel (post-hydration DOM). Check for third-party scripts that mutate the DOM before hydration.`,
+          keyPoints: [
+            'setup runs on both server and client; first client render must match',
+            'Preferences affecting first paint go in cookies, not localStorage',
+            'useId for SSR-stable ids; onMounted / ClientOnly for client-only values',
+            'Invalid HTML nesting is a mismatch cause the parser creates',
+            'data-allow-mismatch for expected differences; production details flag for debugging',
+          ],
+          pitfalls: [
+            'Turning off SSR for the page to "fix" it',
+            'Guarding with `typeof window` inside setup, which still renders different output',
+            'Using a module-level counter for ids (it leaks between requests on the server)',
+          ],
+          followUps: [
+            'How would you avoid a dark-mode flash on a fully static (prerendered) site?',
+            'What does lazy hydration change about mismatches?',
+          ],
+          walkthrough: [
+            {
+              title: 'Frame what must match',
+              body: `\`setup\` and the template render **twice**: on the server to HTML, then in the browser during hydration. Vue compares the vnode tree with the existing DOM. Any value that can differ between the two runs, or any DOM the parser rewrote, is a mismatch.`,
+            },
+            {
+              title: 'Find the four causes',
+              body: `- \`localStorage\` → unavailable on the server, so \`class\` differs (and flickers).
+- \`Math.random()\` → different \`id\` / \`aria-controls\`.
+- \`new Date()\` → time zone and time differ.
+- \`<div>\` inside \`<p>\` → the parser closes \`<p>\` early, changing the DOM tree.`,
+            },
+            {
+              title: 'Fix each with the right tool',
+              body: `\`\`\`ts
+const theme = useCookie('theme', { default: () => 'light' })
+const menuId = useId()
+const greeting = ref('Hello')
+onMounted(() => { greeting.value = computeGreeting() })
+\`\`\`
+And use \`<span>\` inside the paragraph (or a \`<div>\` wrapper). For a single expected difference, \`data-allow-mismatch="text"\`; for widgets that cannot render on the server, \`<ClientOnly>\`.`,
+            },
+            {
+              title: 'Debug it in production',
+              body: `- Build staging with \`__VUE_PROD_HYDRATION_MISMATCH_DETAILS__: true\` to get the diff.
+- Compare View Source (server HTML) with the hydrated DOM.
+- Test in a clean profile: extensions inject attributes.
+- Look for third-party scripts (consent, analytics, widgets) touching the DOM before hydration.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"setup runs on both server and client, so anything environment- or time-dependent breaks hydration. Here: localStorage, Math.random, the date, and a div inside a p that the parser rewrites. I'd move the theme to a cookie so the server renders it, use useId, compute the greeting in onMounted, and fix the nesting. In production I'd enable the hydration-details flag on staging and diff the server HTML against the DOM."`,
+            },
+          ],
+          personalAngle:
+            'Your consent and accessibility scripts ran on customers\' SSR sites. Use that as the real example: a script that touched the DOM before the host framework hydrated, and how you scheduled or isolated it to avoid mismatches.',
+          references: [{ label: 'Vue docs: SSR hydration mismatch', url: 'https://vuejs.org/guide/scaling-up/ssr.html' }],
+        },
+        {
+          id: 'vue-3-5-modern-apis',
+          title: 'Modern Vue 3.5+: what changed and how you use it',
+          type: 'concept',
+          difficulty: 'core',
+          priority: 'should',
+          tags: ['vue-3-5', 'props-destructure', 'usetemplateref', 'useid', 'lazy-hydration', 'vapor-mode'],
+          estMinutes: 6,
+          roles: ['frontend', 'full-stack'],
+          prompt: `"You have used Vue for a few years. **What changed in Vue 3.4–3.5 (and what is coming with Vapor Mode) that affects how you write components today?** Show at least three APIs in code."`,
+          intent:
+            'Tests whether your Vue knowledge is current and whether you understand the trade-offs of each new API, not just the names. A strong answer covers reactive props destructure (and its getter caveat), useTemplateRef, useId, defineModel, onWatcherCleanup, lazy hydration, and positions Vapor Mode accurately.',
+          hints: [
+            'Start with `<script setup>` macros: what changed about destructuring `defineProps()`, and which macro replaced the prop + emit pair for `v-model`?',
+            'Template refs used to require a `ref(null)` with a matching variable name. What does 3.5 offer instead, and how do SSR-safe ids work now?',
+            'For SSR: what new options let a component hydrate only when visible or idle?',
+            'Shape: `const { size = "md" } = defineProps<P>()` (pass `() => size` onward) · `defineModel()` · `useTemplateRef("el")` · `useId()` · `onWatcherCleanup()` · `defineAsyncComponent({ loader, hydrate: hydrateOnVisible() })` · Vapor Mode opt-in per component, no virtual DOM, still maturing.',
+          ],
+          answer: `**Vue 3.4–3.5 mostly removed boilerplate and footguns in \`<script setup>\` and improved SSR; Vapor Mode is the next step for performance.**
+
+**Reactive props destructure (3.5, stable):**
+\`\`\`ts
+const { size = 'md', disabled = false } = defineProps<{ size?: 'sm' | 'md'; disabled?: boolean }>()
+watch(() => size, (s) => console.log(s)) // pass a getter, not the bare variable
+\`\`\`
+The compiler rewrites \`size\` to \`props.size\`, so it stays reactive and native defaults replace \`withDefaults\`. Caveat: \`watch(size, ...)\` or \`useX(size)\` passes a plain value; wrap it in a getter.
+
+**\`defineModel\` (3.4):** a ref that reads the prop and emits \`update:x\` on write; supports multiple models and modifiers.
+
+**\`useTemplateRef\` (3.5):**
+\`\`\`ts
+const input = useTemplateRef<HTMLInputElement>('search') // matches ref="search"
+onMounted(() => input.value?.focus())
+\`\`\`
+Decouples the variable name from the \`ref\` string and works with dynamic ref names.
+
+**\`useId\` (3.5):** SSR-stable unique ids for \`label for\`, \`aria-describedby\`, \`aria-controls\`.
+
+**Watchers:** \`onWatcherCleanup\` (cancel the previous async run), \`deep: number\`, \`once\`, and \`pause()\`/\`resume()\` on handles.
+
+**SSR:** lazy hydration strategies for async components:
+\`\`\`ts
+const Comments = defineAsyncComponent({ loader: () => import('./Comments.vue'), hydrate: hydrateOnVisible() })
+\`\`\`
+plus \`hydrateOnIdle\`, \`hydrateOnInteraction\`, \`hydrateOnMediaQuery\`; and \`data-allow-mismatch\` for expected differences.
+
+**Internals:** the 3.5 reactivity refactor cut memory use substantially and sped up large arrays, with no API change.
+
+**\`Teleport\` \`defer\`** (3.5) lets a teleport target be rendered later in the same tree.
+
+**Vapor Mode:** an opt-in compile target (introduced with Vue 3.6, still maturing) that compiles \`<script setup>\` components to direct DOM updates without the virtual DOM, opted into per component and interoperable with normal components. Useful for performance-critical subtrees; most apps are not migrating wholesale yet.`,
+          keyPoints: [
+            'Reactive props destructure with native defaults; pass getters onward',
+            'defineModel for v-model',
+            'useTemplateRef and useId',
+            'onWatcherCleanup and watcher pause/resume',
+            'Lazy hydration strategies and data-allow-mismatch',
+            'Vapor Mode: opt-in, no virtual DOM, still maturing',
+          ],
+          pitfalls: [
+            'Passing a destructured prop directly to watch or a composable',
+            'Claiming Vapor Mode replaces the virtual DOM for all apps today',
+          ],
+          followUps: [
+            'How would you migrate a component library like REI-KIT to these APIs safely?',
+            'When would Vapor Mode not be worth it?',
+          ],
+          personalAngle:
+            'REI-KIT is a good migration story: describe moving components from withDefaults to destructured defaults, or from manual id counters to useId, and what you checked to avoid breaking consumers.',
+          references: [{ label: 'Vue blog: Announcing Vue 3.5', url: 'https://blog.vuejs.org/posts/vue-3-5' }],
         },
       ],
     },

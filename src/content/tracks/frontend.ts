@@ -25,10 +25,13 @@ const track: Track = {
           estMinutes: 5,
           roles: ['frontend', 'full-stack'],
           prompt: `**Describe the architecture of a modern browser such as Chrome.** Which processes and threads exist, and why does "keep the main thread free" matter so much?`,
+          intent:
+            'Tests whether you understand the process and thread model well enough to reason about responsiveness and security. A strong answer names the processes and site isolation, explains what the main thread vs compositor do, and turns that into concrete practices (yielding, workers, compositor-only animation).',
           hints: [
-            'Think about the browser process and renderer processes.',
-            'Inside a renderer, which thread runs JavaScript, style and layout?',
-            'Some animations can run without the main thread. Which ones?',
+            'Why does one crashed tab not take down the whole browser? Think about which processes exist.',
+            'Inside one renderer process, which single thread runs JavaScript, style, layout and most event handlers?',
+            'Some work can continue while that thread is busy: scrolling and certain animations. Which thread does it, and which CSS properties qualify?',
+            'Shape: browser + GPU + network/storage + per-site sandboxed renderers (site isolation, Spectre) → main thread vs compositor vs workers → 16.7 ms frame budget, long tasks > 50 ms hurt INP → yield (`scheduler.yield()`), Workers, animate `transform`/`opacity`.',
           ],
           answer: `**Chrome is multi-process.** A **browser process** handles the UI, navigation and permissions; a **GPU process** handles drawing; **network and storage services** run separately; and each site gets its own sandboxed **renderer process** (with *site isolation*, different sites run in different processes, for security against attacks like Spectre and for stability).
 
@@ -66,10 +69,50 @@ const track: Track = {
           estMinutes: 6,
           roles: ['frontend', 'full-stack'],
           prompt: `**What happens between receiving the HTML and the first pixels on screen?** Which resources block rendering, and how do \`async\`, \`defer\` and \`type="module"\` change things?`,
+          intent:
+            'Tests whether you can describe the pipeline from bytes to pixels and use it to explain what blocks first paint. A strong answer lists the stages in order, distinguishes render-blocking CSS from parser-blocking scripts, compares async/defer/module precisely, and ends with concrete optimisations.',
           hints: [
-            'There are two trees, then they combine.',
-            'CSS blocks rendering; synchronous scripts block parsing.',
-            'Layout → paint → composite.',
+            'The browser builds two trees from two kinds of resource. Which ones, and how are they combined?',
+            'After the styles are known, three more stages produce pixels. Which one computes geometry, which records drawing, which assembles layers on the GPU?',
+            'CSS and classic scripts block different things. Which one blocks rendering, and which one blocks HTML parsing? How do `async` and `defer` differ in timing and order?',
+            'Shape: DOM + CSSOM → style/render tree → layout → paint → composite; CSS render-blocking, `<script>` parser-blocking; async = run on download (no order), defer/module = after parse (in order); fixes: critical CSS, defer, preload/fetchpriority for LCP, font-display, SSR/prerender.',
+          ],
+          walkthrough: [
+            {
+              title: 'Walk the pipeline',
+              body: `1. HTML → **DOM** (incremental; the preload scanner fetches ahead).
+2. CSS → **CSSOM**.
+3. **Style**: combine into the render tree (visible nodes only).
+4. **Layout**: geometry of every box.
+5. **Paint**: record draw operations into layers.
+6. **Composite**: rasterise and assemble layers on the GPU.`,
+            },
+            {
+              title: 'What blocks what',
+              body: `- **CSS is render-blocking**: no paint until the CSSOM for \`<head>\` stylesheets exists (prevents FOUC).
+- **Classic \`<script>\` is parser-blocking**: parsing stops to fetch and run it, and it also waits for pending CSS because it may read styles.`,
+            },
+            {
+              title: 'Compare script loading',
+              body: `| | Blocks parsing | Runs | Order |
+| --- | --- | --- | --- |
+| \`<script>\` | yes | immediately | yes |
+| \`async\` | no | when downloaded | no |
+| \`defer\` | no | after parse, before DOMContentLoaded | yes |
+| \`type="module"\` | no | deferred by default | yes |`,
+            },
+            {
+              title: 'Optimise the path',
+              body: `- Inline critical CSS, load the rest non-blocking, drop unused CSS.
+- \`defer\`/modules for app code, \`async\` for independent third parties.
+- \`<link rel="preload">\` + \`fetchpriority="high"\` for the LCP image; \`preconnect\` to key origins.
+- \`font-display: swap\`/\`optional\`.
+- SSR/prerender so first paint does not wait for JS.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"HTML becomes the DOM and CSS the CSSOM; they combine into the render tree, then layout computes geometry, paint records drawing and the compositor assembles layers. CSS blocks rendering and classic scripts block parsing. async runs as soon as it downloads with no ordering; defer and modules run in order after parsing. To speed it up: critical CSS, deferred scripts, preload and fetchpriority for the LCP image, and server-rendered HTML."`,
+            },
           ],
           answer: `**The steps of the critical rendering path:**
 1. **Parse HTML into the DOM.** The parser is incremental, and a *preload scanner* looks ahead to fetch resources early.
@@ -126,10 +169,45 @@ cards.forEach((card) => {
   card.style.height = height * 1.5 + 'px' // write
 })`,
           },
+          intent:
+            'Tests whether you can recognise forced synchronous layout from code and fix it by batching, and whether you know the relative cost of layout, paint and composite. A strong answer explains why each iteration forces layout, shows the read-then-write fix, and names the DevTools evidence.',
           hints: [
-            'Reading offsetHeight needs up-to-date layout.',
-            'The write in each iteration invalidates the layout for the next read.',
-            'Separate the reads from the writes.',
+            'To return `offsetHeight`, what must the browser make sure is up to date first?',
+            'After `card.style.height = ...`, the layout is dirty. What does the next iteration\'s read then force the browser to do, and how many times does that happen?',
+            'If all 500 reads happened before any write, how many layouts would be needed?',
+            'Fix: `const heights = cards.map(c => c.offsetHeight)` then `requestAnimationFrame(() => cards.forEach((c, i) => c.style.height = heights[i] * 1.5 + "px"))`. Cost order: layout > paint > composite-only (`transform`, `opacity`).',
+          ],
+          walkthrough: [
+            {
+              title: 'Name the problem',
+              body: `This is **layout thrashing** (forced synchronous layout). Normally the browser batches layout once per frame; interleaving geometry reads with style writes forces it to lay out **on demand**, here 500 times.`,
+            },
+            {
+              title: 'Explain the mechanism',
+              body: `Iteration 1: read (layout is clean) → write (layout dirty). Iteration 2: read \`offsetHeight\` → the browser must recompute layout **now** to answer → write (dirty again)… Each forced layout may touch the whole list, so the cost is roughly O(n²).`,
+            },
+            {
+              title: 'Batch reads, then writes',
+              body: `\`\`\`js
+const cards = [...document.querySelectorAll('.card')]
+const heights = cards.map((c) => c.offsetHeight) // one layout
+requestAnimationFrame(() => {
+  cards.forEach((c, i) => { c.style.height = heights[i] * 1.5 + 'px' }) // one layout before paint
+})
+\`\`\`
+Better: let CSS do it (\`grid\`, \`aspect-ratio\`, a \`scale\` transform) so no JS measurement is needed.`,
+            },
+            {
+              title: 'Reflow vs repaint vs composite',
+              body: `- **Reflow/layout**: geometry changes (width, height, fonts, DOM insertions): most expensive.
+- **Repaint**: visual-only (color, background, shadow).
+- **Composite**: \`transform\`/\`opacity\` on its own layer: cheapest; use for animation.
+Layout-forcing reads: \`offset*\`, \`client*\`, \`scrollTop\`, \`getBoundingClientRect()\`, \`getComputedStyle()\`. Evidence: purple Layout blocks with a "Forced reflow" warning in the Performance panel. Also \`content-visibility: auto\` for off-screen cards.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"Each write dirties layout and the next offsetHeight read forces the browser to recompute it synchronously, 500 times. I'd read all heights first, then write them in one requestAnimationFrame, so layout runs once, or avoid measuring with CSS. Layout is the most expensive step, paint is cheaper, and transform or opacity changes only need compositing. The Performance panel flags this as forced reflow."`,
+            },
           ],
           answer: `**This is layout thrashing, also called *forced synchronous layout*.** Each \`style.height\` write invalidates the layout, and the next iteration's \`offsetHeight\` read forces the browser to recalculate it **immediately**, 500 times, instead of once before the next frame.
 
@@ -182,9 +260,51 @@ outer.addEventListener('click', () => log('outer capture'), { capture: true })
 btn.addEventListener('click', () => log('btn'))
 document.addEventListener('click', () => log('document'))`,
           },
+          intent:
+            'Tests whether you know the three propagation phases precisely and can apply them to event delegation. A strong answer gives the exact log order, explains why registration order does not decide it, distinguishes target/currentTarget and stopPropagation/preventDefault, and writes a delegation handler with closest().',
           hints: [
-            'There are three phases: capture (top-down), target, then bubble (bottom-up).',
-            'Registration order does not matter across phases.',
+            'An event travels in three phases. In which direction does each one go?',
+            'The capture listener on `outer` was registered after the bubble listener. Does registration order matter across phases, or only within the same element and phase?',
+            'Order the four listeners by phase: what fires on the way down, at the target, and on the way up to `document`?',
+            'Answer: `outer capture`, `btn`, `outer bubble`, `document`. Delegation: one listener on the list, `e.target.closest("[data-id]")`, check `list.contains(item)`.',
+          ],
+          walkthrough: [
+            {
+              title: 'Recall the phases',
+              body: `**Capture** (window → target's parent), **target**, then **bubble** (target's parent → window). \`{ capture: true }\` listeners run on the way down; default listeners run on the way up.`,
+            },
+            {
+              title: 'Order the listeners',
+              body: `\`\`\`text
+outer capture   <- capture phase, on the way down
+btn             <- target
+outer bubble    <- bubbling up
+document        <- bubbling further up
+\`\`\`
+Registration order only matters for listeners on the same element in the same phase.`,
+            },
+            {
+              title: 'Use it: event delegation',
+              body: `\`\`\`js
+list.addEventListener('click', (e) => {
+  const item = e.target.closest('[data-id]')
+  if (!item || !list.contains(item)) return
+  select(item.dataset.id)
+})
+\`\`\`
+One listener for any number of items, works for items added later, no per-item cleanup.`,
+            },
+            {
+              title: 'Edge cases',
+              body: `- \`target\` (clicked element, maybe a nested span) vs \`currentTarget\` (element running the listener).
+- \`stopPropagation\` stops travel; \`stopImmediatePropagation\` also skips remaining listeners on that element; \`preventDefault\` cancels the default action and is unrelated to propagation.
+- \`focus\`/\`blur\`/\`mouseenter\` do not bubble; delegate with \`focusin\`/\`focusout\`.
+- Over-using \`stopPropagation\` breaks delegation and analytics above you.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"It logs outer capture, btn, outer bubble, document: capture runs top-down first, then the target, then bubbling bottom-up, and registration order only matters within one phase. Delegation puts one listener on a parent and uses closest to find the item, which handles dynamic lists cheaply. I'd use focusin for focus events and avoid stopPropagation because it breaks delegation higher up."`,
+            },
           ],
           answer: `\`\`\`text
 outer capture
@@ -236,10 +356,40 @@ list.addEventListener('click', (e) => {
           estMinutes: 5,
           roles: ['frontend', 'full-stack'],
           prompt: `**Why does semantic HTML matter, and how do you make a custom component accessible?** When should you use ARIA, and when should you avoid it?`,
+          intent:
+            'Tests whether you understand accessibility as semantics plus behaviour, not as adding ARIA attributes. A strong answer explains the accessibility tree, states the first rule of ARIA and why ARIA does not add behaviour, lists name/role/value + keyboard + focus requirements for custom widgets, and describes realistic testing.',
           hints: [
-            'Assistive technology reads the accessibility tree, which is built from semantics.',
-            'The first rule of ARIA.',
-            'Name, role, value, keyboard support and focus.',
+            'A screen reader does not read your pixels. What structure does it read, and where does that structure come from?',
+            'Compare `<button>` and `<div onclick>`: list everything the native element gives you for free.',
+            'If you add `role="button"` to a div, what does it gain and what is still missing? That is the first rule of ARIA.',
+            'Shape: native semantics (landmarks, headings, button vs link, labels, alt) → first rule of ARIA, ARIA changes announcement not behaviour → custom widget = APG pattern: name/role/value, keyboard, focus, live regions → contrast, reduced motion, zoom → test with keyboard, screen reader and axe.',
+          ],
+          walkthrough: [
+            {
+              title: 'Start from the accessibility tree',
+              body: `Assistive tech reads the **accessibility tree**, built from HTML semantics: each node has a **role**, an accessible **name**, a **state/value**. Native elements populate it correctly and add behaviour: \`<button>\` is focusable, works with Enter and Space, and is announced as a button. \`<div onclick>\` has none of it.`,
+            },
+            {
+              title: 'Default to native semantics',
+              body: `Landmarks (\`header\`, \`nav\`, \`main\`, \`footer\`), a heading hierarchy, \`<button>\` for actions and \`<a href>\` for navigation, \`<label for>\`, \`<fieldset>\`/\`<legend>\`, real lists and tables, \`alt\` text (\`alt=""\` for decorative images).`,
+            },
+            {
+              title: 'Use ARIA only when needed',
+              body: `**First rule of ARIA:** do not use it if a native element does the job. ARIA changes what is **announced**, not what the element **does**:
+\`\`\`html
+<!-- still needs tabindex, Enter/Space handlers, focus styles -->
+<div role="button" tabindex="0">Save</div>
+\`\`\`
+For custom widgets (combobox, tabs, menu), follow the **WAI-ARIA APG** pattern: name/role/value, expected keys, roving tabindex or \`aria-activedescendant\`, visible \`:focus-visible\`, focus moved into and back from dialogs, \`aria-live\` for async updates.`,
+            },
+            {
+              title: 'Beyond markup and testing',
+              body: `Contrast (AA 4.5:1 body text), not colour alone, \`prefers-reduced-motion\`, 200% zoom and reflow, target size. Test keyboard-only, with VoiceOver/NVDA, and with axe/Lighthouse, knowing automated tools catch only a portion of issues.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"Semantic HTML builds the accessibility tree, so native elements give roles, names, keyboard support and focus for free. The first rule of ARIA is not to use it when a native element works, because ARIA only changes what's announced, not behaviour. For custom widgets I follow the APG pattern: name, role, value, keyboard and focus management, plus live regions. And I test with a keyboard and a real screen reader, not just axe."`,
+            },
           ],
           answer: `**Semantic elements give you behaviour and meaning for free:** roles, accessible names, keyboard support and focus handling, which assistive technologies read through the **accessibility tree**. A \`<button>\` is focusable, activates with Enter and Space, and is announced as "button". A \`<div onclick>\` has none of that.
 
@@ -292,10 +442,57 @@ list.addEventListener('click', (e) => {
   </div>
 </div>`,
           },
+          intent:
+            'Tests whether you can audit real markup systematically for semantics, keyboard access, naming and focus management. A strong answer lists the concrete problems, rewrites it with a native dialog and real buttons and labels, and covers focus return, Escape, inertness and the bubbling overlay-click bug.',
           hints: [
-            'Can a keyboard user reach and activate everything?',
-            'What does a screen reader announce when the modal opens?',
-            'Where does focus go, and can it escape behind the modal?',
+            'Try it keyboard-only: can you Tab to "Delete" and the "×", and activate them with Enter or Space?',
+            'When this opens, what does a screen reader announce? Does it know a dialog appeared, and what are the input, image and close control called?',
+            'Where is focus after opening, can Tab reach the page behind, does Escape work, and where does focus go on close? Also: what happens when you click the input, given the overlay listener?',
+            'Fix shape: `<dialog aria-labelledby aria-describedby>` + `showModal()` (inert background, Escape, initial focus), `<h2>`, `<label for>`, `alt=""`, two `<button type="button">` with "Delete project" and `aria-label="Close"`, focus returned to the trigger on `close`, backdrop close only when `e.target === dialog`.',
+          ],
+          walkthrough: [
+            {
+              title: 'Audit in passes',
+              body: `Go through four lenses: **semantics** (what is it?), **keyboard** (can I operate it?), **naming** (what is it called?), **focus** (where am I?). Each lens finds different bugs.`,
+            },
+            {
+              title: 'List the problems',
+              body: `1. No \`role="dialog"\`/\`aria-modal\`/name: nothing announces the dialog.
+2. \`div\`/\`span\` "buttons": not focusable, no role, no keyboard; "×" has no name.
+3. Placeholder instead of a label.
+4. Image without \`alt\`.
+5. No focus move, no trap, no Escape, no focus return.
+6. Clicks inside \`.modal\` bubble to the overlay and close it.`,
+            },
+            {
+              title: 'Rewrite with native elements',
+              body: `\`\`\`html
+<dialog id="delete-dialog" aria-labelledby="del-title" aria-describedby="del-desc">
+  <h2 id="del-title">Delete project?</h2>
+  <p id="del-desc"><img src="warning.svg" alt=""> This cannot be undone.</p>
+  <label for="confirm-name">Type the project name to confirm</label>
+  <input id="confirm-name" autocomplete="off">
+  <button type="button" class="danger">Delete project</button>
+  <button type="button" aria-label="Close">×</button>
+</dialog>
+\`\`\`
+\`\`\`js
+const trigger = document.activeElement
+dialog.showModal() // top layer, inert page, Escape, initial focus
+dialog.addEventListener('close', () => trigger?.focus(), { once: true })
+dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close() })
+\`\`\``,
+            },
+            {
+              title: 'Polish and edge cases',
+              body: `- Disable "Delete" until the name matches and explain why via \`aria-describedby\`.
+- Danger colour with sufficient contrast, not the only cue.
+- If you cannot use \`<dialog>\`, you need \`inert\` on the background, a focus trap and manual Escape handling; \`aria-hidden\` alone is not enough.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"It has no dialog semantics, fake div buttons that keyboards can't reach, an unlabelled input, an image without alt, no focus management, and clicks inside bubble up and close it. I'd use a native dialog with showModal, which makes the page inert and handles Escape, add a heading as its label, real buttons with clear names, a proper label, and return focus to the trigger on close."`,
+            },
           ],
           answer: `**Problems:**
 1. **No dialog semantics:** there is no \`role="dialog"\`, no \`aria-modal\` and no accessible name, so screen readers do not know a dialog opened.
@@ -345,10 +542,13 @@ dialog.addEventListener('close', () => trigger?.focus(), { once: true }) // retu
           estMinutes: 5,
           roles: ['frontend', 'full-stack'],
           prompt: `**Flexbox or Grid: how do you decide?** How do you build responsive components in 2026: media queries, container queries or fluid units? And how do you keep the CSS cascade under control in a component library?`,
+          intent:
+            'Tests whether your CSS approach is current and principled: picking layout primitives by dimensionality, making components responsive to their container, and controlling the cascade in shared code. A strong answer gives a short rule with code, uses container queries and fluid units, and explains cascade layers and tokens.',
           hints: [
-            'One dimension or two?',
-            'A component does not know the viewport; it knows its container.',
-            'Cascade layers and specificity.',
+            'Are you laying out items along one axis, or aligning rows and columns together?',
+            'A card is reused in a sidebar and in the main column. Does the viewport width tell it how much space it has?',
+            'In a component library, how do consumers override styles without a specificity war or `!important`?',
+            'Shape: Flex = 1D, Grid = 2D (combine); media queries for page layout, `container-type: inline-size` + `@container` for components, `clamp()` for fluid type; `@layer reset, tokens, components, utilities`, `:where()` for zero specificity, custom properties for themes.',
           ],
           answer: `**Flexbox for one-dimensional flow** (a row or column of items whose sizes come from their content: toolbars, button groups, centring). **Grid for two-dimensional layout** (rows *and* columns aligned together: page shells, card galleries, forms). They combine well: a Grid page containing Flex components.
 
@@ -420,7 +620,14 @@ dialog.addEventListener('close', () => trigger?.focus(), { once: true }) // retu
               explanation: 'A key shipped with the code is readable by any script, so this protects nothing.',
             },
           ],
-          hints: ['Which storage is invisible to document.cookie and scripts?'],
+          intent:
+            'Tests whether you know which browser storage is readable by scripts and the security trade-off that follows. A strong answer chooses the HttpOnly cookie, explains that XSS can still act as the user, mentions CSRF mitigation, and knows when the other stores are appropriate.',
+          hints: [
+            'An XSS payload runs as JavaScript on your origin. Which of these stores can JavaScript on the origin read?',
+            'Is there a cookie attribute that hides a cookie from `document.cookie` entirely?',
+            'Cookies are sent automatically with requests. What new risk does that create, and which attribute mitigates it?',
+            'Answer: b. `HttpOnly; Secure; SameSite=Lax` cookie set by the server. XSS can still make requests as the user, so prevent XSS too; use CSRF tokens for state-changing cross-site cases.',
+          ],
           answer: `**Use an \`HttpOnly\`, \`Secure\`, \`SameSite=Lax\` (or \`Strict\`) cookie.** JavaScript cannot read it, so an XSS payload cannot steal the token, although XSS can still *make requests* as the user. That is why preventing XSS still matters.
 
 **Overview of browser storage:**
@@ -465,10 +672,44 @@ Every option except HttpOnly cookies is readable by any script on the origin, in
           estMinutes: 6,
           roles: ['frontend', 'full-stack'],
           prompt: `**What are the Core Web Vitals, what are good values, and what would you do to improve each one?**`,
+          intent:
+            'Tests whether your performance knowledge matches how Google and real teams measure it today. A strong answer names LCP, INP and CLS with thresholds at p75, breaks each into causes with concrete fixes, and distinguishes field from lab data.',
           hints: [
-            'Loading, responsiveness and visual stability.',
-            'INP replaced FID in 2024.',
-            'Field data (real users) vs lab data (Lighthouse).',
+            'The three metrics cover loading, responsiveness and visual stability. Which metric covers each, and which one replaced FID in 2024?',
+            'What are the "good" thresholds, and at which percentile of real users are they judged?',
+            'For LCP, think of the timeline: TTFB, resource load delay, load time, render delay. For INP: what blocks the main thread after a click? For CLS: what appears without reserved space?',
+            'Shape: LCP ≤ 2.5 s / INP ≤ 200 ms / CLS ≤ 0.1 at p75 → LCP: discoverable hero + `fetchpriority="high"` + no lazy-load + SSR/CDN; INP: break long tasks, yield, less hydration; CLS: dimensions/aspect-ratio, reserved slots, font metrics → field (CrUX, web-vitals) vs lab (Lighthouse).',
+          ],
+          walkthrough: [
+            {
+              title: 'Define the three metrics',
+              body: `| Metric | Measures | Good (p75) |
+| --- | --- | --- |
+| LCP | when the main content appears | ≤ 2.5 s |
+| INP | interaction → next paint, worst-ish of the visit | ≤ 200 ms |
+| CLS | unexpected layout movement | ≤ 0.1 |
+INP replaced FID in March 2024.`,
+            },
+            {
+              title: 'Fix LCP by sub-part',
+              body: `- **TTFB:** CDN, caching, SSR/SSG.
+- **Load delay:** LCP image in the HTML (not CSS background or JS), \`fetchpriority="high"\`, never \`loading="lazy"\`.
+- **Load time:** AVIF/WebP, \`srcset\`, compression.
+- **Render delay:** less render-blocking CSS/JS, fonts that don't hide text.`,
+            },
+            {
+              title: 'Fix INP and CLS',
+              body: `**INP:** break long tasks and yield (\`scheduler.yield()\`), show feedback first then defer work, reduce hydration cost, virtualise lists, avoid layout thrashing, transitions in React.
+**CLS:** \`width\`/\`height\` or \`aspect-ratio\` on media, reserve space for banners/ads, metric-matched fallback fonts, animate \`transform\`.`,
+            },
+            {
+              title: 'Measure the right data',
+              body: `**Field** (CrUX, \`web-vitals\` library → analytics, with attribution builds) is what Google uses and what users feel. **Lab** (Lighthouse, Performance panel) is reproducible and good for debugging. Optimising the Lighthouse score alone can miss real-user INP problems entirely.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"LCP for loading, under 2.5 seconds; INP for responsiveness, under 200 milliseconds, which replaced FID; CLS for stability, under 0.1, all at the 75th percentile of real users. I fix LCP by making the hero discoverable and prioritised and cutting TTFB, INP by breaking up long tasks and hydration, and CLS by reserving space. I measure with field data and debug with lab tools."`,
+            },
           ],
           answer: `There are three metrics, each judged at the **75th percentile of real-user visits**:
 
@@ -513,10 +754,41 @@ Every option except HttpOnly cookies is readable by any script on the origin, in
           estMinutes: 6,
           roles: ['frontend', 'full-stack'],
           prompt: `In a product dashboard you have: the current user, a list of orders from the API, table filters, a modal's open state and an unsaved form. **Where does each piece of state belong, and when do you actually need a global store?**`,
+          intent:
+            'Tests whether you classify state by ownership and lifetime before choosing a tool, and recognise server state as a cache. A strong answer places each item correctly with a reason, explains why server data does not belong in a hand-rolled global store, and states when a global store is justified.',
           hints: [
-            'Not all state is the same kind: server state, UI state, URL state, form state.',
-            'Server state is really a cache.',
-            'Can the user share or bookmark it?',
+            'Not all state is the same kind. Which of these pieces has its source of truth on the server, which in the URL, which only in one component?',
+            'The orders list is really a copy of data that lives elsewhere. What does a copy need (freshness, deduplication, invalidation) that plain state does not provide?',
+            'Should a colleague be able to open your exact filtered view from a link? Where must the filters live for that?',
+            'Answer shape: orders → query cache (TanStack Query / Pinia Colada / loaders); filters → URL params; modal → local; form → local or form library (+ draft); user/session → small global store. Global stores only for shared, client-owned state; derive instead of copying.',
+          ],
+          walkthrough: [
+            {
+              title: 'Classify before choosing',
+              body: `Five kinds of state: **server** (remote source of truth), **URL** (shareable view), **local UI**, **form**, **global client**. The kind decides the home; the library comes second.`,
+            },
+            {
+              title: 'Place each piece',
+              body: `| State | Kind | Home |
+| --- | --- | --- |
+| Orders | server | query cache (TanStack Query, Pinia Colada, SWR, loaders) |
+| Filters/sort/page | URL | query params |
+| Modal open | local UI | component state |
+| Unsaved form | form | local / form library, optional draft in storage |
+| Current user | global client | small store or context |`,
+            },
+            {
+              title: 'Explain why server state differs',
+              body: `It needs caching, dedup, background refetch, invalidation after mutations, and loading/error states. Copying it into Redux or Pinia by hand reimplements all of that, usually with stale data and duplicate requests.`,
+            },
+            {
+              title: 'When a global store is justified',
+              body: `Shared across distant parts of the tree **and** owned by the client: session, preferences, cart, multi-step workflow, toasts. Keep it small, expose actions. Otherwise lift state only to the nearest common parent, use context/provide-inject, and **derive** filtered lists instead of storing them.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"I classify first. Orders are server state, so they go in a query cache that handles freshness and invalidation. Filters go in the URL so the view is shareable. The modal and the form are local. Only the current user is global client state, in a small store. I reach for a global store only for state that's shared widely and owned by the client, and I derive rather than duplicate."`,
+            },
           ],
           answer: `**Classify the state first, then place it as close to where it is used as possible.** Most "global state" problems are really *server cache* problems.
 
@@ -557,10 +829,46 @@ Every option except HttpOnly cookies is readable by any script on the origin, in
           roles: ['frontend', 'full-stack'],
           companyTypes: ['startup', 'mid-size', 'japan-international'],
           prompt: `**Design a widget, such as a consent banner or an accessibility toolbar, that thousands of customer websites embed with one \`<script>\` tag.** Cover loading, isolation, configuration, compatibility with SSR and SPA sites, performance and accessibility.`,
+          intent:
+            'Tests frontend system design under a hostile environment: a host page you do not control. A strong answer clarifies requirements, proposes a layered loading architecture, isolation, a public API, SSR/SPA compatibility, performance budgets, accessibility and operational safety (rollouts, kill switch).',
           hints: [
-            'You do not control the host page: its CSS, its frameworks, or its Content Security Policy.',
-            'Think in layers: a tiny loader, the main bundle, configuration from a CDN.',
-            'How do you avoid breaking SPA navigation and hydration?',
+            'List what you do not control on the host page: its CSS, its JavaScript globals and frameworks, its CSP, its DOM and hydration. Each is a design constraint.',
+            'Think in layers: what is the smallest thing the customer embeds, where does per-site configuration come from, and when does the heavy UI load?',
+            'How do you keep host CSS out of your widget (and yours out of theirs), and how do you avoid breaking the host framework\'s hydration or SPA navigation?',
+            'Shape: requirements → tiny async loader (`data-site-id`) → CDN config with SWR + lazy main bundle → Shadow DOM + CSS custom properties → `window.Widget` API with a pre-load queue → own container on `<body>`, history listeners, idempotent init → no CLS, size budget, versioned caching → accessible dialog → staged rollout, error reporting, kill switch.',
+          ],
+          walkthrough: [
+            {
+              title: 'Clarify requirements and constraints',
+              body: `Ask: UI only, or must it also block other scripts (consent)? Traffic, per-customer configuration, browser support, WCAG AA. Then list constraints: unknown host CSS, frameworks, CSP, and a DOM the host framework owns and hydrates.`,
+            },
+            {
+              title: 'Layer the loading',
+              body: `1. **Loader** (a few KB, \`async\`, versioned CDN URL): reads \`data-site-id\`, fetches site config (short TTL, stale-while-revalidate), lazy-loads the main bundle only when needed.
+2. **Main bundle**: Preact, Vue runtime or plain DOM, all dependencies bundled, no host globals.
+3. **Public API**:
+\`\`\`js
+window.Widget = window.Widget || []          // queue calls made before load
+Widget.push(['on', 'consent', (c) => { /* ... */ }])
+\`\`\``,
+            },
+            {
+              title: 'Isolate and stay compatible',
+              body: `- Render inside **Shadow DOM**; theme via CSS custom properties (they cross the boundary). iframe only when strong isolation is required.
+- Mount into **your own container** on \`<body>\`; never mutate host-owned DOM, or its hydration fails.
+- Survive SPA navigation (history/popstate), remount if \`<body>\` is replaced, idempotent init if injected twice.
+- Document CSP needs (\`script-src\`, \`connect-src\`); no \`eval\`.`,
+            },
+            {
+              title: 'Performance, accessibility, operations',
+              body: `- Never render-blocking; overlay or reserved space for zero CLS; strict size budget; long-cached versioned bundle, short-cached loader.
+- Dialog pattern: focus in/out, Escape, labelled buttons; validate customer theme contrast; reduced motion.
+- Staged rollouts per site, error reporting tagged with site id, a **kill switch** in config, backwards-compatible API.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"A tiny async loader reads the site id, fetches cached config from a CDN and lazy-loads the main bundle. The UI renders in a Shadow DOM inside its own body container, so host CSS can't break it and I never touch DOM the host hydrates. It handles SPA navigation and double injection, has a queued public API, causes no layout shift, is an accessible dialog, and ships with staged rollouts and a kill switch."`,
+            },
           ],
           answer: `**Requirements to clarify first:** what the widget does (UI only, or does it also block other scripts, as consent tools must?), expected traffic, configuration per customer, required browsers, and legal or accessibility requirements (WCAG AA).
 
@@ -604,10 +912,13 @@ Every option except HttpOnly cookies is readable by any script on the origin, in
           estMinutes: 5,
           roles: ['frontend', 'full-stack'],
           prompt: `A customer reports: "**The checkout button sometimes does nothing on our site.**" You cannot reproduce it locally. **Walk me through how you debug it.**`,
+          intent:
+            'Tests whether you debug with a method (evidence, reproduce, isolate, fix, prevent) rather than guessing. A strong answer uses production evidence first, varies timing and environment to reproduce, names specific DevTools techniques, and lists the realistic root causes for a dead button.',
           hints: [
-            '"Sometimes" suggests timing, the environment, or particular data.',
-            'Get evidence from production before guessing.',
-            'Which DevTools panels would you use once you can reproduce it?',
+            'What does "sometimes" usually point to: timing, environment, or specific data? What evidence can you collect before touching code?',
+            'Which production sources (error monitoring, release timeline, user details) narrow it down without reproducing locally?',
+            'To reproduce timing bugs, what can you throttle? Then, which DevTools views show whether a listener is attached or an invisible element is intercepting the click?',
+            'Shape: evidence (browser, extensions, Sentry, deploy timeline) → reproduce (CPU/network throttling, click before hydration, ad blocker, cold cache) → isolate (Event Listeners, element at point, listener breakpoints, Network, Performance) → fix root cause → Playwright regression test.',
           ],
           answer: `**Gather evidence → reproduce → isolate → fix → prevent a recurrence.**
 
@@ -643,6 +954,299 @@ Every option except HttpOnly cookies is readable by any script on the origin, in
           pitfalls: ['Changing code before you can reproduce the issue', 'Treating "works on my machine" as an answer'],
           personalAngle:
             'Enterprise integration issues are exactly this kind of problem: your script on their SSR or SPA site behaving differently. Pick one real incident and walk through it with this structure.',
+        },
+        {
+          id: 'fe-inp-debugging',
+          title: 'Debug: a poor INP on a filter interaction',
+          type: 'debugging',
+          difficulty: 'advanced',
+          priority: 'must',
+          tags: ['inp', 'core-web-vitals', 'long-tasks', 'scheduler-yield', 'performance', 'loaf'],
+          estMinutes: 12,
+          roles: ['frontend', 'full-stack'],
+          prompt: `Field data shows a **p75 INP of 650 ms** on a product listing page, and attribution points at clicks on the category filter chips. Here is the handler. **How do you confirm the cause, and how do you bring INP under 200 ms?**`,
+          code: {
+            language: 'javascript',
+            source: `chips.addEventListener('click', (e) => {
+  const category = e.target.closest('[data-cat]').dataset.cat
+  chips.querySelectorAll('.chip').forEach((c) => c.classList.toggle('active', c.dataset.cat === category))
+
+  const visible = allProducts.filter((p) => matches(p, category)) // 20,000 items, regex matching
+  grid.innerHTML = visible.map(renderCard).join('')                // thousands of cards
+
+  grid.querySelectorAll('.card').forEach((card) => {
+    card.style.minHeight = card.offsetHeight + 'px'                // read + write per card
+  })
+
+  analytics.track('filter', { category, count: visible.length })  // sync, JSON-serialises state
+  localStorage.setItem('lastFilter', JSON.stringify({ category, visible }))
+})`,
+          },
+          intent:
+            'Tests whether you understand what INP measures (input delay + processing + presentation delay) and can fix a slow interaction by giving fast visual feedback and moving or splitting the rest of the work. A strong answer uses field attribution and a lab trace to confirm, identifies each expensive step in the handler, and applies yielding, deferral, rendering reduction and layout fixes.',
+          hints: [
+            'INP is the time from the click to the next frame being painted. Which three phases make it up, and which one would this handler inflate?',
+            'Go line by line: which steps must happen before the user sees feedback, and which could happen after the next paint?',
+            'There is a hidden layout-thrashing loop, a huge `innerHTML`, synchronous analytics and a big synchronous `localStorage` write. Which of these can be removed, deferred, or done off the main thread?',
+            'Fix shape: toggle the active chip first → `await scheduler.yield()` (fallback `setTimeout(0)`) → filter (memoised index or a Worker) → render only the first page or a virtualised window → drop the per-card min-height loop (CSS) → `requestIdleCallback` for analytics and a small `localStorage` value.',
+          ],
+          answer: `**INP = input delay + processing time + presentation delay** for the slowest interactions (roughly the worst one per page visit, at p75). This handler does all of its work synchronously before the browser can paint, so the user waits for every step.
+
+**Confirm first:**
+- **Field attribution:** \`onINP(report, { reportAllChanges: true })\` from \`web-vitals/attribution\` gives the target, the phase breakdown and Long Animation Frame (LoAF) script attribution. Here processing time will dominate.
+- **Lab trace:** DevTools Performance panel with **4× CPU throttling**, click a chip, and inspect the interaction track: one long task with a big "Recalculate style / Layout" block and repeated **forced reflow** warnings.
+
+**Costs in the handler:**
+1. Filtering 20,000 items with regexes on every click.
+2. \`innerHTML\` with thousands of cards: parse, style, layout for all of them.
+3. **Layout thrashing:** read \`offsetHeight\`, write \`minHeight\`, per card.
+4. Synchronous analytics serialisation and a large \`localStorage\` write (synchronous, blocks the main thread).
+
+**Fix: give feedback first, then yield, then do less work.**
+\`\`\`js
+const yieldToMain = () =>
+  globalThis.scheduler?.yield ? scheduler.yield() : new Promise((r) => setTimeout(r, 0))
+
+chips.addEventListener('click', async (e) => {
+  const chip = e.target.closest('[data-cat]')
+  if (!chip) return
+  const category = chip.dataset.cat
+  for (const c of chips.querySelectorAll('.chip')) c.setAttribute('aria-pressed', String(c === chip))
+
+  await yieldToMain() // the browser can paint the pressed chip now
+
+  const visible = productsByCategory.get(category) ?? [] // precomputed index instead of regex scans
+  renderPage(grid, visible.slice(0, 48))                // first page; virtualise or paginate the rest
+  liveRegion.textContent = \`\${visible.length} products\`
+
+  requestIdleCallback(() => {
+    analytics.track('filter', { category, count: visible.length })
+    localStorage.setItem('lastFilter', category)          // store the small key, not the results
+  })
+})
+\`\`\`
+- Remove the measure-and-set loop; reserve card height with CSS (\`aspect-ratio\`, a fixed grid row size), or \`content-visibility: auto\` with \`contain-intrinsic-size\` for off-screen cards.
+- If filtering is still heavy, move it to a **Web Worker** and render when it returns; abort stale results if the user clicks again.
+- In a framework: \`startTransition\`/\`useDeferredValue\` (React) or keeping the chip state separate from the list render so the urgent update is small.
+- Also check **input delay**: other long tasks (third-party scripts, hydration) running when the click happens.
+
+**Verify:** compare the lab trace (no task over 50 ms before the first paint), then watch field p75 INP over the following days.`,
+          keyPoints: [
+            'INP = input delay + processing + presentation delay, at p75',
+            'Confirm with web-vitals attribution / LoAF and a throttled Performance trace',
+            'Visual feedback first, then yield (scheduler.yield with fallback)',
+            'Render less: precomputed index, pagination or virtualisation, no innerHTML of thousands',
+            'Remove layout thrashing; defer analytics and storage to idle time',
+          ],
+          pitfalls: [
+            'Debouncing the click, which delays feedback and makes INP worse',
+            'Optimising only with an unthrottled desktop trace',
+            'Moving everything into a single setTimeout, which still blocks the next interaction',
+          ],
+          followUps: [
+            'How does hydration affect INP on an SSR page?',
+            'When is a Web Worker worth the serialisation cost?',
+          ],
+          walkthrough: [
+            {
+              title: 'Understand what INP measures',
+              body: `From the input to the **next paint**: **input delay** (main thread busy when the click lands) + **processing** (your handlers) + **presentation delay** (style, layout, paint of the result). A synchronous handler that does everything blocks the paint until it finishes.`,
+            },
+            {
+              title: 'Confirm with data',
+              body: `\`\`\`js
+import { onINP } from 'web-vitals/attribution'
+onINP((m) => send({ value: m.value, target: m.attribution.interactionTarget,
+  input: m.attribution.inputDelay, processing: m.attribution.processingDuration,
+  presentation: m.attribution.presentationDelay }))
+\`\`\`
+Then a lab trace with 4× CPU throttling: look for one long task with forced reflows.`,
+            },
+            {
+              title: 'Feedback first, then yield',
+              body: `\`\`\`js
+setPressed(chip)
+await (globalThis.scheduler?.yield?.() ?? new Promise((r) => setTimeout(r, 0)))
+renderPage(grid, (index.get(category) ?? []).slice(0, 48))
+requestIdleCallback(() => { analytics.track(/*...*/); localStorage.setItem('lastFilter', category) })
+\`\`\`
+The pressed chip paints immediately; the heavy work runs in later tasks.`,
+            },
+            {
+              title: 'Do less work overall',
+              body: `- Precompute an index instead of regex-scanning 20,000 items per click; or use a Worker.
+- Render a page or a virtualised window, not thousands of cards via \`innerHTML\`.
+- Delete the read/write loop (layout thrashing); size with CSS; \`content-visibility: auto\`.
+- Store a small key, not the filtered results.
+- Check input delay from third-party scripts and hydration.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"INP is input delay plus processing plus presentation delay until the next paint. Attribution and a throttled trace would show one long task: regex filtering of 20,000 items, a huge innerHTML, a layout-thrashing loop and synchronous analytics and storage. I'd update the chip first, yield with scheduler.yield, render from a precomputed index with pagination or virtualisation, remove the measure loop, and push analytics and storage to idle time. Then confirm in field data."`,
+            },
+          ],
+          personalAngle:
+            'Your accessibility platform and consent widgets ran on customer pages, where they added to input delay for every interaction. Mention how you would measure your own script\'s contribution with LoAF script attribution.',
+          references: [
+            { label: 'web.dev: Interaction to Next Paint', url: 'https://web.dev/articles/inp' },
+            { label: 'web.dev: Optimize long tasks', url: 'https://web.dev/articles/optimize-long-tasks' },
+          ],
+        },
+        {
+          id: 'fe-accessible-combobox',
+          title: 'Build an accessible autocomplete (combobox) with correct focus management',
+          type: 'coding',
+          difficulty: 'advanced',
+          priority: 'should',
+          tags: ['accessibility', 'combobox', 'aria-activedescendant', 'focus-management', 'keyboard', 'live-region'],
+          estMinutes: 25,
+          roles: ['frontend', 'full-stack'],
+          prompt: `Build a **city autocomplete**: typing filters a list of suggestions; arrow keys move through them; Enter selects; Escape closes. It must work with a keyboard and a screen reader. **Write the markup and the key handling, and explain your focus strategy.** (Framework-agnostic; plain DOM is fine.)`,
+          intent:
+            'Tests whether you can implement a non-trivial ARIA pattern correctly, not just name it. A strong answer uses the WAI-ARIA combobox pattern (input with role=combobox, aria-expanded, aria-controls, aria-activedescendant, listbox/option with aria-selected), keeps DOM focus on the input, implements the keyboard contract, announces result counts, and covers mouse and edge cases.',
+          hints: [
+            'Where should real DOM focus stay while the user arrows through suggestions: on the input, or on each option? What would happen to typing if focus moved?',
+            'If focus stays on the input, how does a screen reader know which option is "current"? Look for an ARIA attribute that points at an id.',
+            'List the roles and states: the input, the popup list, each option, whether the popup is open, which option is highlighted, and how the number of results is announced.',
+            'Skeleton: `<input role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="city-list" aria-activedescendant="">` + `<ul id="city-list" role="listbox">` with `<li role="option" id="city-3" aria-selected="true">`; keydown: ArrowDown/Up move index and set `aria-activedescendant`, Enter selects, Escape closes; a polite live region says "5 suggestions".',
+          ],
+          answer: `**Use the WAI-ARIA combobox pattern with \`aria-activedescendant\`: DOM focus stays on the input, and the input points at the visually highlighted option.** That keeps typing, the caret and IME composition working while screen readers announce the active option.
+
+\`\`\`html
+<label for="city">City</label>
+<input id="city" type="text" role="combobox"
+       aria-autocomplete="list" aria-expanded="false"
+       aria-controls="city-list" autocomplete="off">
+<ul id="city-list" role="listbox" aria-label="City suggestions" hidden></ul>
+<div id="city-status" class="visually-hidden" aria-live="polite"></div>
+\`\`\`
+
+\`\`\`js
+const input = document.getElementById('city')
+const list = document.getElementById('city-list')
+const status = document.getElementById('city-status')
+let items = []
+let active = -1
+
+function render() {
+  list.replaceChildren(...items.map((name, i) => {
+    const li = document.createElement('li')
+    li.id = \`city-opt-\${i}\`
+    li.role = 'option'
+    li.textContent = name
+    li.setAttribute('aria-selected', String(i === active))
+    li.addEventListener('pointerdown', (e) => { e.preventDefault(); choose(i) }) // keep focus in input
+    return li
+  }))
+  const open = items.length > 0
+  list.hidden = !open
+  input.setAttribute('aria-expanded', String(open))
+  if (active >= 0) {
+    input.setAttribute('aria-activedescendant', \`city-opt-\${active}\`)
+    document.getElementById(\`city-opt-\${active}\`).scrollIntoView({ block: 'nearest' })
+  } else {
+    input.removeAttribute('aria-activedescendant')
+  }
+}
+
+function close() { items = []; active = -1; render() }
+function choose(i) { input.value = items[i]; close() }
+
+input.addEventListener('input', () => {
+  const q = input.value.trim().toLowerCase()
+  items = q ? CITIES.filter((c) => c.toLowerCase().includes(q)).slice(0, 8) : []
+  active = -1
+  render()
+  status.textContent = q ? \`\${items.length} suggestions\` : ''
+})
+
+input.addEventListener('keydown', (e) => {
+  if (e.isComposing) return // do not hijack IME (Japanese input)
+  const open = items.length > 0
+  switch (e.key) {
+    case 'ArrowDown': e.preventDefault(); if (open) { active = (active + 1) % items.length; render() } break
+    case 'ArrowUp':   e.preventDefault(); if (open) { active = (active - 1 + items.length) % items.length; render() } break
+    case 'Enter':     if (open && active >= 0) { e.preventDefault(); choose(active) } break
+    case 'Escape':    if (open) { e.preventDefault(); close() } else { input.value = '' } break
+  }
+})
+input.addEventListener('blur', () => setTimeout(close, 0))
+\`\`\`
+
+**Focus strategy:**
+- **\`aria-activedescendant\`** (focus stays on the input) is the right choice for comboboxes; **roving \`tabindex\`** (moving real focus) suits menus, tabs and toolbars, not text inputs.
+- Options are **not** in the Tab order; Tab leaves the widget.
+- \`pointerdown\` + \`preventDefault\` keeps the input focused when clicking an option.
+
+**Details that separate good from great:**
+- Respect **IME composition** (\`isComposing\`) so Enter confirms Japanese input rather than selecting.
+- Announce counts in a **polite live region**, debounced for fast typing.
+- Visible highlight that does not rely on colour alone; sufficient contrast; \`:focus-visible\` on the input.
+- With async suggestions: debounce, abort stale requests, announce "Loading".
+- Prefer a tested library or a native \`<datalist>\` / \`<select>\` (customisable select is arriving in browsers) when requirements allow; custom comboboxes are easy to get subtly wrong.
+- Test with VoiceOver and NVDA, not only axe.`,
+          keyPoints: [
+            'role=combobox on the input with aria-expanded, aria-controls, aria-autocomplete',
+            'listbox/option with aria-selected; aria-activedescendant keeps DOM focus on the input',
+            'Keyboard contract: arrows, Enter, Escape; options out of the Tab order',
+            'Polite live region for result counts',
+            'IME-safe key handling; pointerdown preventDefault for mouse selection',
+          ],
+          pitfalls: [
+            'Moving DOM focus into the list, which breaks typing and the caret',
+            'Putting role=listbox on a div of buttons and making each one tabbable',
+            'Handling Enter during IME composition',
+            'Announcing every keystroke assertively',
+          ],
+          followUps: [
+            'How would you make the same component in Vue or React and test it?',
+            'When would you choose roving tabindex instead?',
+          ],
+          walkthrough: [
+            {
+              title: 'Pick the pattern and focus strategy',
+              body: `This is the **WAI-ARIA combobox** pattern. Real focus must stay on the input so typing works; the "current" option is communicated with **\`aria-activedescendant\`** pointing at the option's id. (Roving tabindex is for menus, tabs, toolbars.)`,
+            },
+            {
+              title: 'Write the markup',
+              body: `\`\`\`html
+<label for="city">City</label>
+<input id="city" role="combobox" aria-autocomplete="list"
+       aria-expanded="false" aria-controls="city-list" autocomplete="off">
+<ul id="city-list" role="listbox" aria-label="City suggestions" hidden></ul>
+<div class="visually-hidden" aria-live="polite" id="city-status"></div>
+\`\`\`
+Each option: \`<li role="option" id="city-opt-3" aria-selected="true">\`.`,
+            },
+            {
+              title: 'Implement the keyboard contract',
+              body: `\`\`\`js
+input.addEventListener('keydown', (e) => {
+  if (e.isComposing) return
+  if (e.key === 'ArrowDown') { e.preventDefault(); active = (active + 1) % items.length; render() }
+  if (e.key === 'ArrowUp')   { e.preventDefault(); active = (active - 1 + items.length) % items.length; render() }
+  if (e.key === 'Enter' && active >= 0) { e.preventDefault(); choose(active) }
+  if (e.key === 'Escape') { e.preventDefault(); close() }
+})
+\`\`\`
+\`render()\` updates \`aria-expanded\`, \`aria-selected\`, \`aria-activedescendant\` and scrolls the active option into view.`,
+            },
+            {
+              title: 'Edge cases',
+              body: `- Mouse: \`pointerdown\` + \`preventDefault\` so the input keeps focus.
+- IME: ignore keys while \`isComposing\` (critical for Japanese users).
+- Announce "5 suggestions" politely, debounced; announce loading for async.
+- Close on blur; Tab moves on, options are never tabbable.
+- Prefer native or a proven library when possible; test with real screen readers.`,
+            },
+            {
+              title: 'Say it in 30 seconds',
+              body: `"I'd follow the APG combobox pattern: the input has role combobox with aria-expanded and aria-controls, the popup is a listbox of options with aria-selected. Focus stays on the input, and aria-activedescendant points at the highlighted option, so typing keeps working. Arrows move, Enter selects, Escape closes, a polite live region announces the count, and I skip key handling during IME composition."`,
+            },
+          ],
+          personalAngle:
+            'This is your accessibility-platform and REI-KIT territory. If REI-KIT has a select or autocomplete, explain which focus strategy it uses and how you verified it with a screen reader; the IME detail is a strong point for Japanese companies.',
+          references: [{ label: 'WAI-ARIA APG: Combobox pattern', url: 'https://www.w3.org/WAI/ARIA/apg/patterns/combobox/' }],
         },
       ],
     },
