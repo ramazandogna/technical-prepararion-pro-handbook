@@ -3,8 +3,25 @@
 **Personalized Software Engineering Interview Preparation** — a long-term, offline-capable learning environment for a
 mid-level Full-Stack Product Software Engineer preparing for technical interviews in Tokyo and internationally.
 
-> Status: **Alpha** (`0.1.0-alpha`). Fully client-side. No account, no backend — your progress lives in your browser
-> (IndexedDB) and can be exported as a JSON backup at any time.
+> Status: **Alpha** (`0.1.0-alpha`). Fully client-side, no backend of its own. Progress lives in IndexedDB; with a
+> personal **sync code** an end-to-end encrypted copy follows you across devices (see *Sync code* below).
+
+## How to use it
+
+1. Open the app, pick a personal sync code (same code on laptop + phone = same progress).
+2. Home → press **Start** on *Full-Stack* (priority) or *Frontend*. Backend / Software Engineer / PM are coming soon.
+3. Each session (designed by a hiring panel — see [docs/STUDY_PLAN.md](docs/STUDY_PLAN.md)) starts with algorithms,
+   then the mix that role is tested on. Per question: try → *Goal* + hints that get closer each step → guided answer
+   taught step by step → stamp every step and key point → grade Good/Easy → question closes → **Next question**.
+   *Copy full answer* copies the whole answer with code as Markdown.
+
+## Sync code
+
+The code derives a slot id (SHA-256) and an AES-GCM key (PBKDF2). The encrypted backup is stored at
+`textdb.dev/api/data/<slot>` — a free public text store that only ever sees ciphertext. Changes sync ~2.5 s after
+they happen, on tab focus and when back online; failures retry every 60 s while progress stays safe locally.
+Log out uploads, then wipes the device. Caveat: textdb.dev is a free service with no SLA (it can be slow) — keep an
+occasional JSON export from Settings.
 
 Built with **Vue 3 + TypeScript + Vite**, on **[rei-kit](https://www.npmjs.com/package/rei-kit)** as the UI foundation.
 
