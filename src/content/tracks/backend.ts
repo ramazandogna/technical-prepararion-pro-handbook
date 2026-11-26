@@ -1147,6 +1147,651 @@ export const CancelOrderBody = z.object({ reason: z.string().max(500).optional()
         },
       ],
     },
+    {
+      id: 'be-integration',
+      title: 'APIs, jobs & integrations',
+      summary: 'Choosing REST, GraphQL or tRPC, idempotent BullMQ jobs and dead letters, secure webhook receivers, multi-tenant isolation with RLS, cursor pagination, and presigned file uploads.',
+      questions: [
+        {
+          id: 'be-int-rest-graphql-trpc',
+          title: 'REST vs GraphQL vs tRPC for a Vue/React + NestJS product',
+          type: 'tradeoff',
+          difficulty: 'core',
+          priority: 'must',
+          tags: ['api-design', 'rest', 'graphql', 'trpc', 'openapi', 'nestjs', 'type-safety'],
+          estMinutes: 8,
+          roles: ['full-stack', 'backend', 'frontend'],
+          prompt: `*"We are starting a B2B SaaS: a Vue 3 dashboard today, a React admin app later, a NestJS backend, and some customers want to integrate with our API. Would you build REST, GraphQL or tRPC? What would make you change your mind?"*`,
+          intent: 'Tests whether you choose an API style from the consumers and constraints, not from fashion. A strong answer separates internal from public APIs, names the real costs of each (caching, N+1, versioning, coupling), and lands on a concrete recommendation.',
+          hints: [
+            'List the consumers. Which of them do you control, and which are external customers?',
+            'tRPC gives end-to-end types, but what does it require of the client?',
+            'GraphQL solves over-fetching across many clients. What new problems does it bring on the server?',
+            `Frame it: external integrators → REST + OpenAPI (generated typed clients for Vue/React too). tRPC only if every client is TypeScript in the same monorepo. GraphQL when many clients need different shapes of a rich graph, accepting N+1 (DataLoader), query cost limits and harder HTTP caching.`,
+          ],
+          answer: `**Recommendation for this product: REST with an OpenAPI contract**, and generated TypeScript clients for the Vue and React apps. External customers are the deciding factor: they expect plain HTTP, docs, and stable versioning.
+
+**REST (+ OpenAPI)**
+- Universal: any language, curl, API gateways, webhooks, rate limiting per route.
+- **HTTP caching** works naturally (\`GET\`, \`ETag\`, CDN).
+- End-to-end types are still possible: NestJS \`@nestjs/swagger\` produces the spec from DTOs, and tools like \`openapi-typescript\` generate client types. The contract is checked in CI.
+- Costs: over- or under-fetching, several round trips for nested screens, and versioning discipline.
+
+**GraphQL**
+- One endpoint, the **client chooses the fields**; great when many clients (web, mobile, partners) need different shapes of a rich, connected domain.
+- Costs: **N+1 queries** in resolvers (needs DataLoader batching), **query cost and depth limits** against abusive queries, HTTP caching is harder (mostly POST; needs persisted queries or a normalized client cache), field-level authorization in every resolver, and more tooling (schema, codegen, Apollo/urql).
+
+**tRPC**
+- Calls server procedures as typed functions: change a return type and the client fails to compile. Minimal ceremony; ideal for a **TypeScript monorepo** where you own every client.
+- Costs: **TypeScript clients only**, tight coupling between server and client deploys, no natural public contract. NestJS integration is possible but not native, since Nest's controllers and DTOs are a different model.
+
+**What would change my mind:**
+- Internal-only product, one team, TS everywhere, Next.js or a Vite monorepo → **tRPC** for speed.
+- Many front ends with very different data needs over a deep graph (marketplace, social feed), and a team ready to run it → **GraphQL**, possibly as a BFF over REST services.
+- Mixed approach is common: public REST API + an internal BFF for the dashboard.`,
+          walkthrough: [
+            {
+              title: 'Start from the consumers',
+              body: `Internal Vue/React apps you control vs external customers who integrate. External consumers push you towards a stable, language-neutral contract.`,
+            },
+            {
+              title: 'Give each style its real costs',
+              body: `REST: round trips, versioning. GraphQL: N+1, query cost limits, caching, resolver-level auth. tRPC: TS-only clients, coupled deploys, no public contract.`,
+            },
+            {
+              title: 'Show you can still get type safety with REST',
+              body: `NestJS DTOs → OpenAPI via \`@nestjs/swagger\` → generated client types, with a CI check that the spec and the client match.`,
+            },
+            {
+              title: 'Commit and name the triggers',
+              body: `*"REST + OpenAPI here; tRPC if it were internal and all TypeScript; GraphQL if many clients needed different shapes of a rich graph."*`,
+            },
+          ],
+          keyPoints: [
+            'Decision driven by consumers (internal vs external)',
+            'REST + OpenAPI gives typed clients and HTTP caching',
+            'GraphQL costs: N+1/DataLoader, query cost limits, caching, field auth',
+            'tRPC: great DX but TS-only and tightly coupled',
+            'Clear recommendation plus what would change it',
+          ],
+          pitfalls: [
+            'Saying GraphQL is "faster" by default',
+            'Picking tRPC for a public API',
+            'Assuming REST cannot be end-to-end typed',
+          ],
+          followUps: [
+            'How would you version the REST API without breaking existing customers?',
+            'How do you prevent N+1 queries in a GraphQL resolver?',
+          ],
+          personalAngle: 'On the accessibility platform you integrated with enterprise client sites; use that to explain why external consumers need a stable, documented contract more than clever typing.',
+          references: [
+            { label: 'NestJS docs: OpenAPI', url: 'https://docs.nestjs.com/openapi/introduction' },
+            { label: 'GraphQL: Learn', url: 'https://graphql.org/learn/' },
+          ],
+        },
+        {
+          id: 'be-int-bullmq-duplicate-email',
+          title: 'Debugging: BullMQ sends duplicate emails (idempotency, retries, dead letters)',
+          type: 'debugging',
+          difficulty: 'advanced',
+          priority: 'must',
+          tags: ['bullmq', 'redis', 'background-jobs', 'idempotency', 'retries', 'dead-letter-queue'],
+          estMinutes: 15,
+          roles: ['backend', 'full-stack'],
+          prompt: `Users sometimes receive the **welcome email two or three times**. The queue is configured with \`attempts: 5\` and exponential backoff. **Find every way this code can send duplicates, fix it, and explain how failed jobs should end up somewhere a human can see.**`,
+          code: {
+            language: 'typescript',
+            source: `// signup.controller.ts (the mobile client retries the request on timeout)
+await emailQueue.add('welcome', { userId: user.id })
+
+// email.worker.ts
+new Worker(
+  'email',
+  async (job) => {
+    const user = await db.user.findUniqueOrThrow({ where: { id: job.data.userId } })
+    await mailer.send({ to: user.email, template: 'welcome' })
+    await db.user.update({ where: { id: user.id }, data: { welcomeSentAt: new Date() } })
+    await analytics.track('welcome_sent', { userId: user.id }) // flaky third-party API
+  },
+  { connection, concurrency: 10 },
+)`,
+          },
+          intent: 'Tests whether you know queues are at-least-once and can find duplicate sources at every layer: the producer, retries after a side effect, and stalled jobs. A strong answer fixes it with enqueue dedupe, an idempotency record and isolation of side effects, and sets up failure visibility.',
+          hints: [
+            'Retries rerun the whole function. Which line succeeds before a later one fails?',
+            'Look at the producer too: what happens when the client retries the signup request?',
+            'BullMQ holds a lock per active job. What if the worker crashes, or blocks the event loop longer than the lock duration, after sending?',
+            `Fixes: deterministic \`jobId: welcome-\${userId}\` at enqueue; an \`email_log\` row keyed by the same key checked and written around the send (and passed as the provider idempotency key if supported); move analytics to its own job; \`UnrecoverableError\` for permanent failures; keep failed jobs (\`removeOnFail: false\`) and move exhausted ones to a dead-letter queue with an alert.`,
+          ],
+          answer: `**Root cause:** job queues are **at-least-once**. The handler is not idempotent, so every rerun repeats the email. There are three sources of reruns here:
+
+1. **Retry after the side effect.** The email is sent, then \`analytics.track\` (or the DB update) throws. BullMQ retries the **whole** job up to 5 times, sending the email each time.
+2. **Duplicate enqueue.** The client retries the signup request on timeout; every request adds another job with a random id.
+3. **Stalled jobs.** If the worker crashes, or blocks the event loop longer than \`lockDuration\` (30 s by default) after sending, the lock expires and the job is moved back to wait and processed again.
+
+**Fix: make every layer idempotent.**
+
+\`\`\`ts
+// Producer: deterministic id, so a second add() is ignored while the job exists
+await emailQueue.add('welcome', { userId: user.id }, {
+  jobId: \`welcome-\${user.id}\`,
+  attempts: 5,
+  backoff: { type: 'exponential', delay: 2000 },
+  removeOnComplete: { age: 7 * 24 * 3600 }, // keep a week so dedupe still works
+  removeOnFail: false,                      // keep failures visible
+})
+
+// Worker: one side effect per job, guarded by an idempotency record
+new Worker('email', async (job) => {
+  const key = \`welcome:\${job.data.userId}\`
+  const log = await db.emailLog.findUnique({ where: { key } })
+  if (log?.status === 'sent') return 'already-sent'
+
+  const user = await db.user.findUnique({ where: { id: job.data.userId } })
+  if (!user) throw new UnrecoverableError('user deleted') // permanent: do not retry
+
+  await db.emailLog.upsert({ where: { key }, create: { key, status: 'sending' }, update: {} })
+  await mailer.send({ to: user.email, template: 'welcome', idempotencyKey: key }) // if the provider supports it
+  await db.emailLog.update({ where: { key }, data: { status: 'sent', sentAt: new Date() } })
+
+  // Non-critical follow-up is its own job: its failure cannot resend the email
+  await analyticsQueue.add('track', { event: 'welcome_sent', userId: user.id }, { jobId: \`welcome-sent-\${user.id}\` })
+}, { connection, concurrency: 10 })
+\`\`\`
+
+The \`email_log.key\` column has a **unique constraint**. There is still a small window (crash after sending, before marking \`sent\`), which is why the provider idempotency key matters: true exactly-once delivery to an external system is not possible, so you combine at-least-once processing with deduplication.
+
+**Dead letters:** BullMQ has no separate DLQ; exhausted jobs stay in the **failed** set. Keep them (\`removeOnFail: false\` or an age limit), listen to \`worker.on('failed', ...)\`, and when \`job.attemptsMade >= job.opts.attempts\` copy the job to a \`email-dlq\` queue (or table) and alert. Fix the cause, then retry from the dashboard (Bull Board) with \`job.retry()\`.
+
+**Also:** close workers on \`SIGTERM\` (\`await worker.close()\`) so deploys do not create stalled jobs.`,
+          walkthrough: [
+            {
+              title: 'Name the guarantee',
+              body: `Queues deliver **at least once**. Any rerun of a non-idempotent handler is a duplicate. Then look for reruns at every layer.`,
+            },
+            {
+              title: 'List the three duplicate sources',
+              body: `Retry after the email already went out (analytics or DB failed); duplicate enqueue from client retries; stalled jobs after a crash or a long event-loop block beyond \`lockDuration\`.`,
+            },
+            {
+              title: 'Fix the producer',
+              body: `Deterministic \`jobId\` so repeated \`add()\` calls are ignored while the job is kept. Keep completed jobs long enough for that dedupe window.`,
+            },
+            {
+              title: 'Fix the worker',
+              body: `Check and write an \`email_log\` row with a unique key around the send, pass the key to the provider, move analytics to its own job, throw \`UnrecoverableError\` for permanent failures.`,
+            },
+            {
+              title: 'Make failures visible',
+              body: `Keep failed jobs, move exhausted ones to a dead-letter queue on the \`failed\` event, alert, and replay after the fix. Close workers gracefully on SIGTERM.`,
+            },
+          ],
+          keyPoints: [
+            'At-least-once delivery; handlers must be idempotent',
+            'Retry reruns the whole job, including completed side effects',
+            'Deterministic jobId dedupes enqueue',
+            'Idempotency record with unique key + provider idempotency key',
+            'Exhausted jobs: failed set / DLQ + alert; UnrecoverableError for permanent errors',
+          ],
+          pitfalls: [
+            'Only lowering attempts to 1, which hides the problem and loses emails',
+            'Ignoring the producer side (client retries)',
+            'Claiming BullMQ guarantees exactly-once processing',
+            'removeOnComplete: true, which removes the job immediately so jobId no longer dedupes',
+          ],
+          followUps: [
+            'How would you use the transactional outbox pattern so the job is enqueued only if the signup transaction commits?',
+            'How do you shut down a worker gracefully during a deploy?',
+          ],
+          personalAngle: 'You ran BullMQ/Redis scheduled scraping jobs with recovery and restart logic; explain how you made reruns safe there (for example upserts keyed by a stable record id).',
+          references: [
+            { label: 'BullMQ docs', url: 'https://docs.bullmq.io/' },
+          ],
+        },
+        {
+          id: 'be-int-webhook-receiver',
+          title: 'Build a webhook receiver: signature, idempotency, replay protection',
+          type: 'coding',
+          difficulty: 'advanced',
+          priority: 'must',
+          tags: ['webhooks', 'hmac', 'security', 'idempotency', 'nestjs', 'express', 'payments'],
+          estMinutes: 30,
+          roles: ['backend', 'full-stack'],
+          prompt: `*"A payment provider sends webhooks to \`POST /webhooks/payments\`. The header looks like \`X-Signature: t=1767225600,v1=<hex HMAC-SHA256 of "t.rawBody">\`. The provider retries until it gets a 2xx and may deliver the same event twice or out of order. Write the NestJS (or Express) receiver."*`,
+          intent: 'Tests secure, reliable integration code: verifying the HMAC over the raw bytes with a constant-time compare, rejecting old timestamps, deduplicating by event id, and acknowledging fast while doing work asynchronously. A strong answer also handles out-of-order events.',
+          hints: [
+            'What exactly is signed? What happens to it if a JSON body parser runs first?',
+            'How do you compare two signatures without leaking timing information?',
+            'Signature alone does not stop an attacker from re-sending a captured request. Which two checks do?',
+            `Plan: raw body (\`NestFactory.create(AppModule, { rawBody: true })\` or \`express.raw()\`), parse \`t\` and \`v1\`, reject if \`|now - t| > 300 s\`, \`createHmac("sha256", secret).update(t + ".").update(raw)\` + \`timingSafeEqual\`; insert \`event.id\` with \`ON CONFLICT DO NOTHING\`; enqueue with \`jobId: event.id\`; return 200 quickly.`,
+          ],
+          answer: `**Direct answer:** verify the signature over the **raw body**, reject stale timestamps, store the event id with a **unique constraint**, enqueue the work, and return 200 fast. The business logic runs in a worker and is itself idempotent.
+
+**1. Verification (pure, easy to unit test):**
+
+\`\`\`ts
+import { createHmac, timingSafeEqual } from 'node:crypto'
+
+export function verifySignature(
+  rawBody: Buffer,
+  header: string | undefined,
+  secrets: string[],          // more than one during secret rotation
+  toleranceSec = 300,
+  nowMs = Date.now(),
+): boolean {
+  if (!header) return false
+  let timestamp = NaN
+  const signatures: Buffer[] = []
+  for (const part of header.split(',')) {
+    const [k, v] = part.split('=', 2)
+    if (k === 't') timestamp = Number(v)
+    else if (k === 'v1' && v) signatures.push(Buffer.from(v, 'hex'))
+  }
+  // Replay protection, part 1: reject old (or far-future) timestamps
+  if (!Number.isFinite(timestamp) || Math.abs(nowMs / 1000 - timestamp) > toleranceSec) return false
+
+  return secrets.some((secret) => {
+    const expected = createHmac('sha256', secret).update(\`\${timestamp}.\`).update(rawBody).digest()
+    return signatures.some((sig) => sig.length === expected.length && timingSafeEqual(sig, expected))
+  })
+}
+\`\`\`
+
+**2. Controller: raw body, verify, accept.**
+
+\`\`\`ts
+// main.ts: const app = await NestFactory.create(AppModule, { rawBody: true })
+// Express: app.post('/webhooks/payments', express.raw({ type: 'application/json' }), handler)
+
+@Controller('webhooks')
+export class WebhooksController {
+  constructor(private readonly config: ConfigService, private readonly inbox: WebhookInbox) {}
+
+  @Post('payments')
+  @HttpCode(200)
+  async payments(@Req() req: RawBodyRequest<Request>, @Headers('x-signature') signature?: string) {
+    const secrets = this.config.getOrThrow<string>('WEBHOOK_SECRETS').split(',')
+    if (!req.rawBody || !verifySignature(req.rawBody, signature, secrets)) {
+      throw new BadRequestException('invalid signature')
+    }
+    const event = JSON.parse(req.rawBody.toString('utf8')) as { id: string; type: string }
+    await this.inbox.accept(event)
+    return { received: true }
+  }
+}
+\`\`\`
+
+**3. Inbox: dedupe by event id (replay protection, part 2).**
+
+\`\`\`ts
+async accept(event: { id: string; type: string }) {
+  await this.db.$executeRaw\`
+    INSERT INTO webhook_events (id, type, payload, status)
+    VALUES (\${event.id}, \${event.type}, \${JSON.stringify(event)}::jsonb, 'received')
+    ON CONFLICT (id) DO NOTHING\`
+  const row = await this.db.webhookEvent.findUniqueOrThrow({ where: { id: event.id } })
+  if (row.status === 'processed') return                  // duplicate delivery: just ack
+  await this.queue.add(event.type, { eventId: event.id }, { jobId: event.id }) // jobId dedupes too
+}
+\`\`\`
+Re-enqueueing whenever the row is not yet \`processed\` covers the case where the insert succeeded but enqueue failed and the provider retried.
+
+**4. Worker:** load the row, apply the change **in one transaction with** \`status = 'processed'\`. For **out-of-order** events, do not trust arrival order: compare the event's \`created\` time or object version with what you stored, or fetch the current object from the provider API and apply that state.
+
+**Also:** respond within the provider's timeout (seconds), use HTTPS only, exclude this route from CSRF/auth guards but rate-limit it, and never log the secret or full card data.`,
+          walkthrough: [
+            {
+              title: 'Keep the raw bytes',
+              body: `The HMAC is over the exact bytes sent. Enable \`rawBody: true\` in NestJS or \`express.raw()\` on this route; re-serialised JSON would not match.`,
+            },
+            {
+              title: 'Verify correctly',
+              body: `Parse \`t\` and \`v1\`, reject if the timestamp is outside about 5 minutes, compute \`HMAC-SHA256(secret, t + "." + raw)\`, and compare with \`timingSafeEqual\` after a length check. Accept several secrets for rotation.`,
+            },
+            {
+              title: 'Deduplicate by event id',
+              body: `\`INSERT ... ON CONFLICT (id) DO NOTHING\` on a table with the event id as primary key. Together with the timestamp window, this blocks replays and provider retries.`,
+            },
+            {
+              title: 'Acknowledge fast, process async',
+              body: `Enqueue with \`jobId: event.id\` and return 200. The worker applies the change and marks the row processed in one transaction.`,
+            },
+            {
+              title: 'Handle ordering',
+              body: `Events can arrive out of order: compare versions or timestamps, or re-fetch the object from the provider before applying state.`,
+            },
+          ],
+          keyPoints: [
+            'HMAC over the raw body, not parsed JSON',
+            'Constant-time compare (timingSafeEqual) with length check',
+            'Timestamp tolerance + event-id unique constraint stop replays',
+            'Ack quickly; heavy work in an idempotent worker',
+            'Out-of-order events handled by version or re-fetch',
+          ],
+          pitfalls: [
+            'Verifying against JSON.stringify(req.body)',
+            'Comparing signatures with === (timing leak)',
+            'Doing slow work before responding, causing provider timeouts and more retries',
+            'Returning 500 for duplicates, which makes the provider retry forever',
+          ],
+          followUps: [
+            'How do you rotate the webhook secret without downtime?',
+            'How would you replay events after a bug in the handler?',
+          ],
+          references: [
+            { label: 'Node.js: crypto.timingSafeEqual', url: 'https://nodejs.org/api/crypto.html' },
+            { label: 'NestJS docs: Raw body', url: 'https://docs.nestjs.com/faq/raw-body' },
+          ],
+        },
+        {
+          id: 'be-int-multi-tenant-rls',
+          title: 'Multi-tenant isolation: Postgres RLS vs app-level tenant checks',
+          type: 'tradeoff',
+          difficulty: 'advanced',
+          priority: 'should',
+          tags: ['multi-tenancy', 'saas', 'postgres', 'row-level-security', 'supabase', 'authorization'],
+          estMinutes: 10,
+          roles: ['backend', 'full-stack'],
+          prompt: `*"Our B2B SaaS keeps all customers in one Postgres database with a \`tenant_id\` column. A bug last month showed one customer another customer's projects. Do we enforce isolation in the application, with row-level security, or by separating databases? Walk me through the trade-offs."*`,
+          intent: 'Tests security thinking for SaaS: where the tenant boundary is enforced, how it fails, and how RLS really works (session settings, pooling, owner bypass). A strong answer recommends layered defence and explains the operational costs of each model.',
+          hints: [
+            'Why did the leak happen? Usually one query forgot `WHERE tenant_id = ...`. Which design makes that impossible rather than unlikely?',
+            'With RLS, how does Postgres know the current tenant on a pooled connection?',
+            'Which roles bypass RLS even when it is enabled?',
+            `Frame it: app-level scoping (central repository / Prisma extension, tenant from the auth token) as the main layer; RLS policies on \`current_setting('app.tenant_id', true)\` set with \`set_config(..., true)\` inside each transaction as defence in depth; app role is not the table owner (or \`FORCE ROW LEVEL SECURITY\`); schema or database per tenant only for strict enterprise needs.`,
+          ],
+          answer: `**Recommendation: layered.** Scope every query in the application **and** add Postgres RLS as a safety net, so a forgotten \`WHERE\` returns zero rows instead of another customer's data. Move to schema- or database-per-tenant only for customers who need hard isolation.
+
+**App-level tenant checks**
+- Tenant id comes from the **verified token / session**, never from the request body.
+- Centralise it: a repository base class or a **Prisma client extension** that adds \`tenantId\` to every query, plus a lint rule or code review for raw SQL.
+- Pros: simple, portable, easy to debug. Cons: **one missed filter leaks data**, and raw queries, reports and background jobs are easy to miss.
+
+**Postgres row-level security**
+\`\`\`sql
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE projects FORCE ROW LEVEL SECURITY; -- applies to the table owner too
+
+CREATE POLICY tenant_isolation ON projects
+  USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+\`\`\`
+\`\`\`ts
+await prisma.$transaction(async (tx) => {
+  await tx.$executeRaw\`SELECT set_config('app.tenant_id', \${tenantId}, true)\` // transaction-scoped
+  return tx.project.findMany()
+})
+\`\`\`
+- The database enforces it for **every** query path. If the setting is missing, \`current_setting(..., true)\` is NULL and no rows match, so it **fails closed**.
+- Gotchas: **superusers and \`BYPASSRLS\` roles always bypass**, the owner bypasses unless \`FORCE\`; with a connection pool (PgBouncer in transaction mode) the setting **must be transaction-local**, or it leaks to the next request on that connection; index \`tenant_id\` first in composite indexes; policies are harder to test and debug; migrations and admin jobs need a separate role.
+- **Supabase** uses exactly this model: policies on \`auth.uid()\` or JWT claims, so RLS is mandatory when the browser talks to the database directly.
+
+**Schema- or database-per-tenant**
+- Strongest isolation, per-tenant backup/restore and data residency.
+- Costs: migrations run N times, connection counts grow, cross-tenant analytics is harder. Fits a few large enterprise tenants, not thousands of small ones.
+
+**Whatever you choose:** automated tests that log in as tenant A and assert tenant B's ids return 404, tenant id in logs and traces, and include tenant id in cache keys.`,
+          walkthrough: [
+            {
+              title: 'Diagnose the failure mode',
+              body: `A leak in a shared-table model is almost always a missing tenant filter. The goal is to make that mistake return nothing instead of someone else's data.`,
+            },
+            {
+              title: 'Describe app-level scoping',
+              body: `Tenant from the verified token, a central repository or Prisma extension that always adds \`tenantId\`. Simple, but relies on every code path.`,
+            },
+            {
+              title: 'Explain RLS precisely',
+              body: `Policy on \`current_setting('app.tenant_id', true)\`, set with \`set_config(..., true)\` per transaction (pool safety). Fails closed. Owner bypass unless \`FORCE\`, superuser and BYPASSRLS always bypass.`,
+            },
+            {
+              title: 'Place the isolation spectrum',
+              body: `Shared tables + RLS → schema per tenant → database per tenant: more isolation, more operational cost. Choose per customer tier.`,
+            },
+            {
+              title: 'Recommend and add tests',
+              body: `Layered: app scoping + RLS. Cross-tenant tests in CI, tenant id in logs and cache keys.`,
+            },
+          ],
+          keyPoints: [
+            'Tenant id from the auth context, never from input',
+            'RLS as defence in depth; fails closed when unset',
+            'Transaction-local settings with pooled connections',
+            'Owner/superuser/BYPASSRLS bypass; use FORCE and a non-owner role',
+            'Schema/DB per tenant for strict isolation, at operational cost',
+          ],
+          pitfalls: [
+            'Using SET (session) instead of transaction-local settings behind a pool',
+            'Running the app as the table owner or a superuser and assuming RLS applies',
+            'Trusting a tenantId sent by the client',
+            'Forgetting tenant id in cache keys',
+          ],
+          followUps: [
+            'How would you run a cross-tenant analytics job safely?',
+            'How do you add RLS to an existing production table without downtime?',
+          ],
+          personalAngle: 'The accessibility platform was B2B with paying customers; explain how customer data was separated there and what you would add now (for example RLS or cross-tenant tests).',
+          references: [
+            { label: 'PostgreSQL docs: Row Security Policies', url: 'https://www.postgresql.org/docs/current/ddl-rowsecurity.html' },
+          ],
+        },
+        {
+          id: 'be-int-cursor-pagination',
+          title: 'API pagination: offset vs cursor, and implement keyset pagination',
+          type: 'coding',
+          difficulty: 'core',
+          priority: 'must',
+          tags: ['api-design', 'pagination', 'postgres', 'keyset', 'sql', 'performance'],
+          estMinutes: 20,
+          roles: ['backend', 'full-stack'],
+          prompt: `*"\`GET /projects?page=500&limit=20\` is slow, and users scrolling the feed see the same item twice when new items are added. Explain why, then implement **cursor pagination** for \`GET /projects?limit=20&cursor=...\`, newest first, for one tenant."*`,
+          intent: 'Tests understanding of why OFFSET is slow and unstable, and whether you can write correct keyset pagination: a unique tiebreaker, a matching index, an opaque cursor and limit + 1 to detect the next page. A strong answer also says when offset is still fine.',
+          hints: [
+            'What does Postgres have to do to return `OFFSET 10000`?',
+            'If a row is inserted at the top while the user is on page 2, what happens to page 3?',
+            'Instead of "skip N rows", say "rows after the last one I saw". Why is `created_at` alone not enough?',
+            `Shape: \`WHERE tenant_id = $1 AND (created_at, id) < ($2, $3) ORDER BY created_at DESC, id DESC LIMIT $4 + 1\`, index \`(tenant_id, created_at DESC, id DESC)\`, cursor = base64url of \`{ createdAt, id }\` of the last item, \`hasMore = rows.length > limit\`.`,
+          ],
+          answer: `**Why offset hurts:** \`OFFSET 10000 LIMIT 20\` still **reads and discards 10,000 rows**, so deep pages get slower linearly. It is also **unstable**: an insert at the top shifts every row down one place, so the next page repeats an item (a delete skips one).
+
+**Cursor (keyset) pagination:** remember the sort key of the last row you returned and ask for rows **after** it. With a matching index this is a direct index seek, so page 500 is as fast as page 1, and inserts do not shift results.
+
+\`\`\`sql
+CREATE INDEX projects_tenant_feed ON projects (tenant_id, created_at DESC, id DESC);
+\`\`\`
+
+\`\`\`ts
+type Cursor = { createdAt: string; id: string }
+type ProjectRow = { id: string; name: string; created_at: Date; cursor_ts: string }
+
+const encodeCursor = (c: Cursor) => Buffer.from(JSON.stringify(c)).toString('base64url')
+
+function decodeCursor(raw: string): Cursor {
+  try {
+    const c = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'))
+    if (typeof c?.createdAt === 'string' && typeof c?.id === 'string') return c
+  } catch {}
+  throw new BadRequestException('invalid cursor')
+}
+
+export async function listProjects(pool: Pool, tenantId: string, q: { limit?: string; cursor?: string }) {
+  const limit = Math.min(Math.max(Number(q.limit) || 20, 1), 100) // clamp user input
+  const after = q.cursor ? decodeCursor(q.cursor) : null
+
+  const { rows } = await pool.query<ProjectRow>(
+    \`SELECT id, name, created_at, created_at::text AS cursor_ts
+       FROM projects
+      WHERE tenant_id = $1
+        AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid))
+      ORDER BY created_at DESC, id DESC
+      LIMIT $4\`,
+    [tenantId, after?.createdAt ?? null, after?.id ?? null, limit + 1], // +1 to detect another page
+  )
+
+  const hasMore = rows.length > limit
+  const items = hasMore ? rows.slice(0, limit) : rows
+  const last = items.at(-1)
+  return {
+    items: items.map(({ cursor_ts, ...p }) => p),
+    nextCursor: hasMore && last ? encodeCursor({ createdAt: last.cursor_ts, id: last.id }) : null,
+  }
+}
+\`\`\`
+
+**Details that matter:**
+- **Unique tiebreaker:** many rows can share \`created_at\`; \`(created_at, id)\` makes the order total, so no row is skipped or repeated.
+- **Row comparison** \`(a, b) < (x, y)\` matches the index order in Postgres.
+- **Precision:** JS \`Date\` keeps milliseconds, \`timestamptz\` keeps microseconds. Building the cursor from a JS \`Date\` can skip rows, so take the text value from SQL (or order by a monotonic id such as bigserial or UUIDv7).
+- **Opaque cursor:** clients must not build it themselves, so you can change the format later.
+
+**Trade-offs:** cursors cannot jump to "page 37" or show a total cheaply. **Offset is still fine** for small admin tables with page numbers. Use cursors for feeds, infinite scroll, public APIs and exports.`,
+          walkthrough: [
+            {
+              title: 'Explain the two offset problems',
+              body: `Cost: Postgres reads and discards OFFSET rows. Stability: inserts and deletes shift pages, causing repeats and gaps.`,
+            },
+            {
+              title: 'Define the keyset query',
+              body: `\`ORDER BY created_at DESC, id DESC\` with \`WHERE (created_at, id) < (cursor)\`. The \`id\` tiebreaker makes the order total. Add the matching composite index starting with \`tenant_id\`.`,
+            },
+            {
+              title: 'Implement the handler',
+              body: `Clamp \`limit\`, decode and validate an opaque base64url cursor, query \`limit + 1\` rows, compute \`hasMore\`, return \`items\` and \`nextCursor\`.`,
+            },
+            {
+              title: 'Mention the precision trap',
+              body: `Build the cursor from the database text value (microseconds), not from a JS \`Date\` (milliseconds), or order by a monotonic id.`,
+            },
+            {
+              title: 'Close with trade-offs',
+              body: `No random page jumps or cheap totals. Offset for small admin tables; cursors for feeds, infinite scroll and APIs.`,
+            },
+          ],
+          keyPoints: [
+            'OFFSET cost grows with depth and pages shift on writes',
+            'Keyset: WHERE (sort, id) < cursor with a matching index',
+            'Unique tiebreaker for a total order',
+            'Opaque, validated cursor; limit clamped; limit + 1 for hasMore',
+            'Offset still OK for small, page-numbered admin views',
+          ],
+          pitfalls: [
+            'Cursor on created_at only (ties skip or repeat rows)',
+            'Index that does not match the ORDER BY',
+            'Losing microsecond precision by round-tripping through Date',
+            'Accepting unbounded limit values',
+          ],
+          followUps: [
+            'How would you support a "previous page" link?',
+            'How do you paginate when the user can sort by any column?',
+          ],
+          references: [
+            { label: 'PostgreSQL docs: LIMIT and OFFSET', url: 'https://www.postgresql.org/docs/current/queries-limit.html' },
+          ],
+        },
+        {
+          id: 'be-int-file-uploads-presigned',
+          title: 'Design file uploads at scale with presigned URLs',
+          type: 'system-design',
+          difficulty: 'advanced',
+          priority: 'should',
+          tags: ['system-design', 'file-upload', 's3', 'object-storage', 'presigned-url', 'security'],
+          estMinutes: 35,
+          roles: ['backend', 'full-stack'],
+          prompt: `*"Users of our SaaS upload files (images and PDFs, up to 2 GB) that they later share inside their team. Today the NestJS API receives the file and writes it to disk. Design a version that scales, stays secure, and survives flaky mobile connections."*`,
+          intent: 'Tests whether you move bytes off the API servers with presigned URLs while keeping control of authorization, validation and lifecycle. A strong answer covers the upload state machine, multipart/resumable uploads, scanning, private serving and orphan cleanup.',
+          hints: [
+            'What happens to API memory, CPU and request timeouts when 50 users upload 2 GB files through it?',
+            'How can the browser upload straight to object storage without holding storage credentials?',
+            'Once the bytes are in the bucket, how do you know the upload finished and the file is what it claims to be?',
+            `Flow: \`POST /uploads\` (auth, quota, type, size) → DB row \`pending\` + key \`tenant/uuid\` → presigned POST (size condition) or multipart with presigned parts → client uploads directly → storage event or \`POST /uploads/:id/complete\` → worker checks size, magic bytes, malware scan, thumbnails → \`ready\` → private bucket, served by short-lived signed GET/CDN URLs; lifecycle rules delete pending objects and abort incomplete multipart uploads.`,
+          ],
+          answer: `**Core idea:** the API **authorises and records** uploads; the bytes go **directly** from the client to object storage (S3, R2, GCS, MinIO) using short-lived **presigned URLs**. API servers never stream gigabytes.
+
+**1. Request an upload** (\`POST /uploads\` with name, size, content type)
+- Check auth, tenant quota, allowed types and maximum size.
+- Create a DB row: \`{ id, tenantId, ownerId, key: "tenants/<tenantId>/<uuid>", status: 'pending', declaredSize, declaredType }\`. Never use the user's file name as the key.
+- Return a presigned URL valid for about 10 minutes.
+
+\`\`\`ts
+// Small files: presigned POST can enforce size limits (a presigned PUT cannot)
+const { url, fields } = await createPresignedPost(s3, {
+  Bucket: 'uploads-private',
+  Key: key,
+  Conditions: [['content-length-range', 1, 25 * 1024 * 1024], ['eq', '$Content-Type', contentType]],
+  Fields: { 'Content-Type': contentType },
+  Expires: 600,
+})
+\`\`\`
+
+**2. Large files and flaky networks: multipart upload**
+- \`CreateMultipartUpload\`, then presign each part (parts of at least 5 MiB, except the last; up to 10,000 parts). The client uploads parts in parallel, retries only failed parts, and can **resume** by asking the API which parts are already done (\`ListParts\`).
+- \`CompleteMultipartUpload\` with the part ETags. Alternatives: the tus protocol, or a library such as Uppy.
+
+**3. Confirm and process**
+- Trigger by a storage event notification (to a queue) or a client \`POST /uploads/:id/complete\`; use both for safety, handled idempotently.
+- A worker runs \`HeadObject\` (real size), sniffs **magic bytes** (do not trust \`Content-Type\` or the extension), runs a **malware scan** (ClamAV or a vendor), creates thumbnails or PDF previews, then sets \`status = 'ready'\`. Failures go to \`rejected\` and the object is deleted.
+
+**4. Serve securely**
+- Bucket is **private**. On download, check permissions, then return a short-lived **signed GET URL** (or a signed CDN URL) with \`Content-Disposition: attachment\` for risky types.
+- Serve user content from a **separate domain** so uploaded HTML or SVG cannot run scripts on your app origin.
+
+**5. Lifecycle and cost**
+- Lifecycle rules: delete objects under a \`pending/\` prefix after 24 h and **abort incomplete multipart uploads** after a few days (they cost money and are invisible in normal listings).
+- Bucket CORS allows only your origins and the methods you use. Track per-tenant storage for quotas and billing.
+
+**Diagram:**
+\`\`\`plaintext
+Client --1. POST /uploads--> API --row 'pending'--> Postgres
+Client <--presigned URL/parts-- API
+Client ==2. PUT bytes==> Object storage --event--> Queue --> Scan/thumbnail worker --> status 'ready'
+Client --3. GET /files/:id--> API (authz) --> signed GET URL --> CDN/storage
+\`\`\``,
+          walkthrough: [
+            {
+              title: 'State the problem with the current design',
+              body: `Streaming 2 GB through the API ties up memory, connections and timeouts, and disk on one server does not scale or survive redeploys.`,
+            },
+            {
+              title: 'Move the bytes, keep the control',
+              body: `API checks auth, quota, type and size, creates a \`pending\` row with a server-generated key, and returns a presigned POST (with a size condition) or presigned PUT.`,
+            },
+            {
+              title: 'Handle large and flaky uploads',
+              body: `S3 multipart: presigned parts of at least 5 MiB, parallel and retryable, resumable via ListParts, finished with CompleteMultipartUpload.`,
+            },
+            {
+              title: 'Verify before use',
+              body: `Storage event or a complete call triggers a worker: HeadObject size, magic-byte sniffing, malware scan, thumbnails, then \`ready\` or \`rejected\`.`,
+            },
+            {
+              title: 'Serve and clean up',
+              body: `Private bucket, permission check then short-lived signed GET or CDN URL from a separate domain; lifecycle rules for pending objects and incomplete multipart uploads.`,
+            },
+          ],
+          keyPoints: [
+            'Direct-to-storage uploads via short-lived presigned URLs',
+            'DB upload record with a state machine (pending → ready/rejected)',
+            'Multipart for large files: parallel, retryable, resumable',
+            'Server-side validation: real size, magic bytes, malware scan',
+            'Private bucket, signed downloads, separate content domain, lifecycle cleanup',
+          ],
+          pitfalls: [
+            'Trusting the client Content-Type or file extension',
+            'Using a presigned PUT and assuming it enforces a size limit',
+            'Public buckets or long-lived URLs for private files',
+            'No cleanup of abandoned or incomplete multipart uploads',
+          ],
+          followUps: [
+            'How would you let users upload to a region that matches their data-residency requirements?',
+            'How do you deduplicate identical files across a tenant?',
+          ],
+          personalAngle: 'You configured servers and Docker deployments yourself; contrast that with why storing uploads on a container or VM disk breaks once you have more than one instance or redeploy often.',
+          references: [
+            { label: 'AWS docs: Uploading objects with presigned URLs', url: 'https://docs.aws.amazon.com/AmazonS3/latest/userguide/PresignedUrlUploadObject.html' },
+          ],
+        },
+      ],
+    },
   ],
 }
 

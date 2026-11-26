@@ -1071,6 +1071,670 @@ const range = {
         },
       ],
     },
+    {
+      id: 'js-machine-coding',
+      title: 'Machine coding: polyfills & utilities',
+      summary: 'Live-coding classics in TypeScript: Promise.all/allSettled, a typed EventEmitter, deepClone with cycles, curry and memoize, a retrying fetch with timeouts and AbortController, and an LRU cache.',
+      questions: [
+        {
+          id: 'js-mc-promise-all',
+          title: 'Implement Promise.all (and how allSettled differs)',
+          type: 'coding',
+          difficulty: 'core',
+          priority: 'must',
+          tags: ['machine-coding', 'promises', 'polyfill', 'async'],
+          estMinutes: 20,
+          roles: ['full-stack', 'frontend', 'backend'],
+          prompt: `*"Without using \`Promise.all\`, write \`promiseAll(values)\`. It must keep the input order, accept plain values as well as promises, reject on the first rejection, and resolve an empty input immediately. Then write \`promiseAllSettled\` and tell me when you would pick each."*`,
+          intent: 'Tests whether you understand promise settlement well enough to rebuild a combinator: order by index (not by completion), a counter instead of array length, wrapping non-promises, and the empty-input edge case. A strong answer also explains fail-fast vs collect-everything semantics.',
+          hints: [
+            'Results finish in any order, but the output must match the input order. What do you store, and where?',
+            'You cannot use `results.length` to know when you are done, because `results[3] = x` makes length 4. Keep a separate counter.',
+            'Wrap every item with `Promise.resolve(item)` so plain values and thenables work. What happens with zero items?',
+            `Skeleton: \`new Promise((resolve, reject) => { const items = Array.from(values); let left = items.length; if (!left) return resolve([]); items.forEach((it, i) => Promise.resolve(it).then(v => { out[i] = v; if (--left === 0) resolve(out) }, reject)) })\`.`,
+          ],
+          answer: `**Direct answer:** create one outer promise, store each result **at its index**, count down a \`remaining\` counter, and pass \`reject\` straight through so the first rejection wins.
+
+\`\`\`ts
+export function promiseAll<T>(values: Iterable<T | PromiseLike<T>>): Promise<Awaited<T>[]> {
+  return new Promise((resolve, reject) => {
+    const items = Array.from(values)          // accept any iterable, not only arrays
+    const results = new Array<Awaited<T>>(items.length)
+    let remaining = items.length
+    if (remaining === 0) return resolve(results) // empty input resolves immediately
+
+    items.forEach((item, i) => {
+      Promise.resolve(item).then((value) => {     // plain values and thenables work too
+        results[i] = value as Awaited<T>          // keep input order
+        if (--remaining === 0) resolve(results)
+      }, reject)                                  // first rejection settles the outer promise
+    })
+  })
+}
+
+export function promiseAllSettled<T>(
+  values: Iterable<T | PromiseLike<T>>,
+): Promise<PromiseSettledResult<Awaited<T>>[]> {
+  // Turn every input into a promise that never rejects, then reuse promiseAll.
+  return promiseAll(
+    Array.from(values, (item) =>
+      Promise.resolve(item).then(
+        (value) => ({ status: 'fulfilled' as const, value }),
+        (reason: unknown) => ({ status: 'rejected' as const, reason }),
+      ),
+    ),
+  )
+}
+\`\`\`
+
+**Why each detail matters:**
+- **Index, not push:** promises settle in any order; \`push\` would order results by completion time.
+- **Counter, not \`length\`:** assigning \`results[4]\` first makes \`length\` 5 immediately.
+- **Calling \`resolve\`/\`reject\` again is harmless:** a promise settles once, so later rejections are ignored. That is exactly fail-fast.
+- **No cancellation:** after a rejection, the other operations **keep running**. \`Promise.all\` cannot stop them. If you need that, pass an \`AbortSignal\` to the underlying work.
+
+**When to use which:**
+| | \`all\` | \`allSettled\` | \`any\` | \`race\` |
+|---|---|---|---|---|
+| Settles when | all fulfil, or first rejects | everything settles | first fulfils (or all reject: \`AggregateError\`) | first settles |
+| Use for | "I need every result" | dashboards, batch jobs, partial failure reporting | fastest mirror | timeouts |`,
+          walkthrough: [
+            {
+              title: 'Wrap everything in one outer promise',
+              body: `Return \`new Promise((resolve, reject) => ...)\`. Convert the input with \`Array.from\` so any iterable works, and resolve \`[]\` straight away when it is empty.`,
+            },
+            {
+              title: 'Store by index and count down',
+              body: `For each item, \`Promise.resolve(item).then(...)\`, write \`results[i] = value\`, and decrement \`remaining\`. Resolve when it reaches 0. Do not use \`push\` or \`results.length\`.`,
+            },
+            {
+              title: 'Pass rejection through',
+              body: `Hand \`reject\` as the second \`.then\` argument. The first rejection settles the outer promise; later calls are ignored because a promise settles only once. Mention that other work keeps running.`,
+            },
+            {
+              title: 'Derive allSettled',
+              body: `Map each item to a promise that always fulfils with \`{ status, value }\` or \`{ status, reason }\`, then reuse \`promiseAll\`. Close by contrasting all / allSettled / any / race.`,
+            },
+          ],
+          keyPoints: [
+            'Results stored by index to preserve input order',
+            'Separate counter; empty input resolves immediately',
+            'Promise.resolve wraps plain values and thenables',
+            'Fail-fast: first rejection wins, other work is not cancelled',
+            'allSettled never rejects; returns status objects',
+          ],
+          pitfalls: [
+            'Using push, which orders results by completion',
+            'Checking results.length === items.length to detect completion',
+            'Forgetting the empty-array case (the promise never settles)',
+            'Believing Promise.all cancels the remaining operations',
+          ],
+          followUps: [
+            'Implement Promise.any, including the AggregateError case.',
+            'How would you limit concurrency to 3 at a time?',
+          ],
+          references: [
+            { label: 'MDN: Promise.all()', url: 'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all' },
+          ],
+        },
+        {
+          id: 'js-mc-event-emitter',
+          title: 'Implement a typed EventEmitter (on / off / once / emit)',
+          type: 'coding',
+          difficulty: 'core',
+          priority: 'must',
+          tags: ['machine-coding', 'event-emitter', 'pub-sub', 'typescript', 'polyfill'],
+          estMinutes: 20,
+          roles: ['full-stack', 'frontend', 'backend'],
+          prompt: `*"Build a small EventEmitter in TypeScript with \`on\`, \`off\`, \`once\` and \`emit\`. \`on\` should return an unsubscribe function. Bonus: make event names and payloads type-safe."*`,
+          intent: 'Tests data-structure choice and the two classic edge cases: removing a once listener by its original function, and a listener that unsubscribes itself during emit. A strong answer also types the event map so `emit` checks its arguments.',
+          hints: [
+            'What structure maps an event name to its listeners? Do you want to allow the same function twice?',
+            'How will `off(event, fn)` find a listener that was registered with `once`? If you wrap `fn`, you lose the reference.',
+            'What happens if a listener calls `off` on itself while you loop over the list?',
+            `Shape: \`Map<event, Array<{ fn, once }>>\`; \`emit\` loops over a **copy** (\`[...list]\`), removes \`once\` entries before calling them; \`off\` compares \`entry.fn === fn\`. Type with \`class Emitter<E extends Record<string, unknown[]>>\` and \`emit<K extends keyof E>(event: K, ...args: E[K])\`.`,
+          ],
+          answer: `**Direct answer:** a \`Map\` from event name to an array of \`{ fn, once }\` entries. Storing a \`once\` flag (instead of a wrapper function) means \`off\` can always find the listener by the function the caller passed. \`emit\` iterates over a **snapshot** so listeners can unsubscribe during emit.
+
+\`\`\`ts
+type Listener<A extends unknown[]> = (...args: A) => void
+type Entry = { fn: Listener<any[]>; once: boolean }
+
+export class Emitter<Events extends Record<string, unknown[]>> {
+  private listeners = new Map<keyof Events, Entry[]>()
+
+  on<K extends keyof Events>(event: K, fn: Listener<Events[K]>): () => void {
+    return this.add(event, { fn: fn as Listener<any[]>, once: false })
+  }
+
+  once<K extends keyof Events>(event: K, fn: Listener<Events[K]>): () => void {
+    return this.add(event, { fn: fn as Listener<any[]>, once: true })
+  }
+
+  off<K extends keyof Events>(event: K, fn: Listener<Events[K]>): void {
+    const list = this.listeners.get(event)
+    const entry = list?.find((e) => e.fn === fn)
+    if (entry) this.remove(event, entry)
+  }
+
+  emit<K extends keyof Events>(event: K, ...args: Events[K]): boolean {
+    const list = this.listeners.get(event)
+    if (!list?.length) return false
+    for (const entry of [...list]) {          // snapshot: safe if listeners call off()
+      if (entry.once) this.remove(event, entry) // remove first, so re-emitting inside fn is safe
+      entry.fn(...args)
+    }
+    return true
+  }
+
+  private add(event: keyof Events, entry: Entry): () => void {
+    const list = this.listeners.get(event) ?? []
+    list.push(entry)
+    this.listeners.set(event, list)
+    return () => this.remove(event, entry)    // unsubscribes exactly this registration
+  }
+
+  private remove(event: keyof Events, entry: Entry): void {
+    const list = this.listeners.get(event)
+    if (!list) return
+    const i = list.indexOf(entry)
+    if (i !== -1) list.splice(i, 1)
+    if (list.length === 0) this.listeners.delete(event) // no empty arrays left behind
+  }
+}
+
+// Usage: payloads are checked at compile time
+const bus = new Emitter<{ login: [userId: string]; logout: [] }>()
+const stop = bus.on('login', (id) => console.log(id.toUpperCase()))
+bus.emit('login', 'u_1')
+// bus.emit('login', 42)  // type error
+stop()
+\`\`\`
+
+**Design decisions to say out loud:**
+- **Array, not Set:** Node's emitter allows the same function twice; a \`Set\` would dedupe. Either is fine if you state it.
+- **Errors:** a throwing listener stops the loop and propagates out of \`emit\` (Node does the same). Wrap each call in \`try/catch\` if listeners must be isolated.
+- **Memory:** unsubscribe in component unmount (\`onUnmounted\` / effect cleanup). Node warns at more than 10 listeners per event for this reason.`,
+          walkthrough: [
+            {
+              title: 'Choose the data structure',
+              body: `A \`Map<eventName, Entry[]>\` where an entry is \`{ fn, once }\`. Keeping the original \`fn\` lets \`off\` find \`once\` listeners too.`,
+            },
+            {
+              title: 'Write add / remove helpers',
+              body: `\`add\` pushes the entry and returns \`() => remove(event, entry)\`; \`remove\` splices by entry identity and deletes the key when the list is empty.`,
+            },
+            {
+              title: 'Make emit safe',
+              body: `Loop over \`[...list]\` so a listener can unsubscribe itself or others without skipping entries. Remove \`once\` entries **before** calling them.`,
+            },
+            {
+              title: 'Add the types',
+              body: `\`Emitter<E extends Record<string, unknown[]>>\` and \`emit<K extends keyof E>(event: K, ...args: E[K])\` make wrong payloads a compile error. Close with error isolation and memory-leak notes.`,
+            },
+          ],
+          keyPoints: [
+            'Map of event to listener list',
+            'once tracked by a flag so off(original fn) still works',
+            'emit iterates a snapshot',
+            'on returns an unsubscribe function',
+            'Typed event map with tuple payloads',
+          ],
+          pitfalls: [
+            'Wrapping once listeners so off(fn) can no longer remove them',
+            'Mutating the array while iterating it, which skips listeners',
+            'Leaving empty arrays or never unsubscribing (leaks)',
+          ],
+          followUps: [
+            'How would you support wildcard events like "user:*"?',
+            'How does this relate to Vue\'s removed $on/$off and libraries like mitt?',
+          ],
+          personalAngle: 'Your Chrome extension work used message passing between content scripts and the background worker; that is the same pub/sub idea, and a good real example of why unsubscribing matters.',
+          references: [
+            { label: 'Node.js: Events', url: 'https://nodejs.org/api/events.html' },
+          ],
+        },
+        {
+          id: 'js-mc-deep-clone',
+          title: 'Implement deepClone with cycles, Date, Map and Set',
+          type: 'coding',
+          difficulty: 'core',
+          priority: 'must',
+          tags: ['machine-coding', 'deep-clone', 'recursion', 'weakmap', 'structured-clone'],
+          estMinutes: 20,
+          roles: ['full-stack', 'frontend', 'backend'],
+          prompt: `*"Write \`deepClone(value)\`. It must handle nested objects and arrays, \`Date\`, \`Map\`, \`Set\`, and **circular references**. Then tell me why you would or would not just use \`structuredClone\` or \`JSON.parse(JSON.stringify(x))\`."*`,
+          intent: 'Tests recursion with a visited map, type-by-type handling, and knowing the built-in alternatives and their limits. A strong answer registers the clone in the WeakMap before recursing, so cycles and shared references are preserved.',
+          hints: [
+            'Start with the base case: which values can you return as they are?',
+            'A cycle means `a.self === a`. How do you remember objects you have already cloned?',
+            'When must you store the new object in that map: before or after copying its children?',
+            `Skeleton: \`if (v === null || typeof v !== "object") return v; if (seen.has(v)) return seen.get(v); if (v instanceof Date) ...; if (v instanceof Map) { const out = new Map(); seen.set(v, out); v.forEach((val, k) => out.set(deepClone(k, seen), deepClone(val, seen))); return out }\` and the same pattern for Set, arrays and plain objects.`,
+          ],
+          answer: `**Direct answer:** recurse by type and keep a \`WeakMap\` from original to clone. Put the clone into the map **before** copying children; that single line handles both cycles and shared references.
+
+\`\`\`ts
+export function deepClone<T>(value: T, seen = new WeakMap<object, unknown>()): T {
+  // Primitives and functions are returned as is (functions are shared, not copied).
+  if (value === null || typeof value !== 'object') return value
+  if (seen.has(value)) return seen.get(value) as T
+
+  if (value instanceof Date) return new Date(value.getTime()) as T
+  if (value instanceof RegExp) return new RegExp(value.source, value.flags) as T
+
+  if (value instanceof Map) {
+    const out = new Map()
+    seen.set(value, out)                       // register before recursing
+    value.forEach((v, k) => out.set(deepClone(k, seen), deepClone(v, seen)))
+    return out as T
+  }
+  if (value instanceof Set) {
+    const out = new Set()
+    seen.set(value, out)
+    value.forEach((v) => out.add(deepClone(v, seen)))
+    return out as T
+  }
+  if (Array.isArray(value)) {
+    const out: unknown[] = []
+    seen.set(value, out)
+    value.forEach((v, i) => { out[i] = deepClone(v, seen) })
+    return out as T
+  }
+
+  // Plain objects and class instances: keep the prototype, copy own keys (including symbols).
+  const out = Object.create(Object.getPrototypeOf(value)) as Record<PropertyKey, unknown>
+  seen.set(value, out)
+  for (const key of Reflect.ownKeys(value)) {
+    out[key] = deepClone((value as Record<PropertyKey, unknown>)[key], seen)
+  }
+  return out as T
+}
+
+const a: any = { d: new Date(), m: new Map([[1, { x: 1 }]]) }
+a.self = a
+const b = deepClone(a)
+console.log(b.self === b, b.d !== a.d, b.m.get(1) !== a.m.get(1)) // true true true
+\`\`\`
+
+**Why \`WeakMap\`:** keys are objects, and it does not keep the originals alive after the call.
+
+**Limits of this version:** getters are invoked and stored as plain values, non-enumerable properties become enumerable, and class instances with private \`#fields\` cannot be copied from outside.
+
+**Built-in alternatives:**
+- **\`structuredClone\`** (browsers, Node 17+): handles cycles, \`Date\`, \`Map\`, \`Set\`, typed arrays and more. It **throws** on functions and DOM nodes and **drops prototypes**, so class instances come back as plain objects. In production, use it first.
+- **\`JSON.parse(JSON.stringify(x))\`:** loses \`undefined\`, functions and symbols, turns \`Date\` into a string, \`Map\`/\`Set\` into \`{}\`, and **throws on cycles**. Only good for plain JSON data.`,
+          walkthrough: [
+            {
+              title: 'Handle the base cases',
+              body: `\`null\` and anything that is not an object (primitives, functions) is returned as is. Then check the \`seen\` WeakMap and return the existing clone if present.`,
+            },
+            {
+              title: 'Branch by type',
+              body: `\`Date\` and \`RegExp\` are rebuilt from their values. For \`Map\`, \`Set\`, arrays and objects, create an empty container first.`,
+            },
+            {
+              title: 'Register before recursing',
+              body: `\`seen.set(original, clone)\` happens **before** children are copied. That is what makes \`a.self = a\` terminate and keeps shared references shared.`,
+            },
+            {
+              title: 'Compare with built-ins',
+              body: `\`structuredClone\` is the production default (cycles, Map, Set, Date) but throws on functions and drops prototypes; the JSON trick loses types and throws on cycles.`,
+            },
+          ],
+          keyPoints: [
+            'Recursive by type with a WeakMap of visited objects',
+            'Clone registered before children are copied',
+            'Date/RegExp rebuilt; Map keys and values both cloned',
+            'structuredClone as the built-in, with its limits',
+            'JSON round-trip loses types and fails on cycles',
+          ],
+          pitfalls: [
+            'Setting seen after recursion, which causes infinite recursion on cycles',
+            'Using a plain object as the visited map (keys become "[object Object]")',
+            'Claiming structuredClone copies functions or class prototypes',
+          ],
+          followUps: [
+            'How would you make it iterative to avoid stack overflow on very deep data?',
+            'Why does Vue\'s reactive proxy break structuredClone, and how do you work around it (toRaw)?',
+          ],
+          references: [
+            { label: 'MDN: structuredClone()', url: 'https://developer.mozilla.org/en-US/docs/Web/API/Window/structuredClone' },
+          ],
+        },
+        {
+          id: 'js-mc-curry-memoize',
+          title: 'Implement curry and memoize (with a cache key)',
+          type: 'coding',
+          difficulty: 'core',
+          priority: 'should',
+          tags: ['machine-coding', 'curry', 'memoize', 'closures', 'higher-order-functions'],
+          estMinutes: 20,
+          roles: ['full-stack', 'frontend', 'backend'],
+          prompt: `*"Write \`curry(fn)\` so that \`curry(add3)(1)(2)(3)\`, \`(1, 2)(3)\` and \`(1)(2, 3)\` all work. Then write \`memoize(fn, options)\` with a configurable **cache key** and a size limit. How does your memoize behave with object arguments and with async functions?"*`,
+          intent: 'Tests closures and argument accumulation (curry), and cache-key design (memoize): what makes two calls "the same", unbounded growth, and caching rejected promises. A strong answer names the limits of fn.length and JSON.stringify keys.',
+          hints: [
+            'curry: how do you know when enough arguments have been collected?',
+            'curry: return a function that keeps the arguments collected so far and asks for more.',
+            'memoize: the default key `JSON.stringify(args)` works for primitives. What breaks with objects, `undefined`, or a function that returns `undefined`?',
+            `Skeleton: \`curried(...args) { return args.length >= arity ? fn(...args) : (...more) => curried(...args, ...more) }\`; memoize keeps \`Map<string, R>\`, uses \`cache.has(k)\` (not a truthy check), evicts the oldest key when \`size > max\`, and deletes the entry if a cached promise rejects.`,
+          ],
+          answer: `**curry:** collect arguments until there are \`arity\` of them, then call \`fn\`.
+
+\`\`\`ts
+export function curry<R>(fn: (...args: any[]) => R, arity = fn.length) {
+  return function curried(...args: unknown[]): any {
+    if (args.length >= arity) return fn(...args)
+    return (...more: unknown[]) => curried(...args, ...more)
+  }
+}
+
+const add3 = (a: number, b: number, c: number) => a + b + c
+const c = curry(add3)
+c(1)(2)(3) === c(1, 2)(3) && c(1)(2, 3) === 6 // true
+\`\`\`
+\`fn.length\` ignores parameters with defaults and rest parameters, so \`(a, b = 1) => ...\` has length 1. That is why \`arity\` is a parameter.
+
+**memoize:** cache by a key function, check with \`has\` (so \`undefined\` results are cached too), bound the size, and do not keep failed promises.
+
+\`\`\`ts
+type MemoOptions<A extends unknown[]> = {
+  key?: (...args: A) => string
+  maxSize?: number
+}
+
+export function memoize<A extends unknown[], R>(
+  fn: (...args: A) => R,
+  { key = (...args) => JSON.stringify(args), maxSize = 1000 }: MemoOptions<A> = {},
+) {
+  const cache = new Map<string, R>()
+
+  const memo = (...args: A): R => {
+    const k = key(...args)
+    if (cache.has(k)) return cache.get(k) as R
+
+    const result = fn(...args)
+    cache.set(k, result)
+    if (cache.size > maxSize) cache.delete(cache.keys().next().value as string) // drop oldest
+
+    if (result instanceof Promise) {
+      result.catch(() => cache.delete(k)) // a rejected call can be retried later
+    }
+    return result
+  }
+  memo.clear = () => cache.clear()
+  return memo
+}
+
+const getUser = memoize((id: string) => fetch(\`/api/users/\${id}\`).then((r) => r.json()), {
+  key: (id) => id,
+  maxSize: 200,
+})
+\`\`\`
+
+**Cache-key trade-offs:**
+- \`JSON.stringify\` treats \`{a:1,b:2}\` and \`{b:2,a:1}\` as different keys, turns \`undefined\` into \`null\` in arrays, and throws on cycles, \`BigInt\`, and so on.
+- For **object identity** (same object means same result), use a \`WeakMap\` keyed by the object, so entries disappear with the object.
+- Caching the **promise** (not the resolved value) also dedupes concurrent calls: two callers in the same tick share one request.
+- Memoize only **pure** functions, or accept staleness explicitly (add a TTL).`,
+          walkthrough: [
+            {
+              title: 'Write curry with an accumulator',
+              body: `\`curried(...args)\` calls \`fn\` when \`args.length >= arity\`; otherwise it returns \`(...more) => curried(...args, ...more)\`. Mention why \`arity\` defaults to \`fn.length\` but can be overridden.`,
+            },
+            {
+              title: 'Build the memo core',
+              body: `Compute \`k = key(...args)\`; return the cached value when \`cache.has(k)\`; otherwise call \`fn\`, store, return. Use \`has\`, not \`if (cache.get(k))\`, so falsy results are cached.`,
+            },
+            {
+              title: 'Bound and fix async',
+              body: `Evict the oldest key when the size limit is exceeded (a Map keeps insertion order). Store the promise for in-flight dedupe, and delete it on rejection.`,
+            },
+            {
+              title: 'Discuss the key',
+              body: `JSON keys depend on property order and fail on cycles; WeakMap gives identity semantics. Only memoize pure functions or add a TTL.`,
+            },
+          ],
+          keyPoints: [
+            'curry accumulates args via closure until arity is reached',
+            'fn.length ignores default and rest params',
+            'cache.has, not a truthy check',
+            'Bounded cache; evict oldest',
+            'Cache promises for dedupe; evict on rejection',
+          ],
+          pitfalls: [
+            'Unbounded memo cache in a long-running server (memory leak)',
+            'Caching a rejected promise forever',
+            'Using JSON.stringify keys for objects without discussing order and identity',
+          ],
+          followUps: [
+            'Turn the size limit into a true LRU. What changes?',
+            'How do Vue computed and React useMemo differ from a general memoize?',
+          ],
+        },
+        {
+          id: 'js-mc-fetch-retry-timeout',
+          title: 'fetch wrapper: retry with exponential backoff, timeout and AbortController',
+          type: 'coding',
+          difficulty: 'advanced',
+          priority: 'must',
+          tags: ['machine-coding', 'fetch', 'abort-controller', 'retry', 'backoff', 'resilience'],
+          estMinutes: 30,
+          roles: ['full-stack', 'frontend', 'backend'],
+          prompt: `*"Write \`fetchWithRetry(url, init, options)\`. Each attempt has its own **timeout**. Retry network errors, timeouts, 429 and 5xx with **exponential backoff and jitter** (respect \`Retry-After\`). Do **not** retry other 4xx. The caller can **cancel** everything with an \`AbortSignal\`, including during the wait between attempts."*`,
+          intent: 'Tests real-world async control flow: per-attempt timeouts vs a user cancel, which failures are retryable, backoff with jitter, and cleanup. A strong answer also raises idempotency: retrying a POST can duplicate side effects.',
+          hints: [
+            'Split failures into two groups: worth retrying (network, timeout, 429, 5xx) and final (other 4xx, caller cancelled).',
+            'Per-attempt timeout and user cancellation are two different signals. How can a single fetch listen to both?',
+            'Backoff: `base * 2 ** attempt`, capped, with random jitter so many clients do not retry at the same moment. The sleep must also stop when the caller aborts.',
+            `Skeleton: \`for (let attempt = 0; ; attempt++) { const signal = AbortSignal.any([userSignal, AbortSignal.timeout(ms)]); try { const res = await fetch(url, { ...init, signal }); if (res.ok || !retryable(res.status) || attempt >= retries) return res; await sleep(delay, userSignal) } catch (e) { if (userSignal?.aborted || attempt >= retries) throw e; await sleep(delay, userSignal) } }\`.`,
+          ],
+          answer: `**Direct answer:** loop over attempts. Combine the caller's signal with a fresh per-attempt \`AbortSignal.timeout()\` using \`AbortSignal.any()\`. Return final responses, retry retryable ones after a jittered, capped, abortable sleep, and never retry once the caller has aborted.
+
+\`\`\`ts
+type RetryOptions = {
+  retries?: number      // extra attempts after the first
+  timeoutMs?: number    // per attempt
+  baseDelayMs?: number
+  maxDelayMs?: number
+  signal?: AbortSignal  // caller cancellation
+}
+
+const RETRYABLE = (status: number) => status === 408 || status === 429 || status >= 500
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason)
+    const onAbort = () => { clearTimeout(id); reject(signal!.reason) }
+    const id = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve() }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+export async function fetchWithRetry(
+  url: string,
+  init: RequestInit = {},
+  { retries = 3, timeoutMs = 5000, baseDelayMs = 300, maxDelayMs = 5000, signal }: RetryOptions = {},
+): Promise<Response> {
+  // "Full jitter": random delay between 0 and the capped exponential value.
+  const backoff = (attempt: number) => Math.random() * Math.min(maxDelayMs, baseDelayMs * 2 ** attempt)
+
+  for (let attempt = 0; ; attempt++) {
+    const timeout = AbortSignal.timeout(timeoutMs)
+    const attemptSignal = signal ? AbortSignal.any([signal, timeout]) : timeout
+
+    try {
+      const res = await fetch(url, { ...init, signal: attemptSignal })
+      if (res.ok || !RETRYABLE(res.status) || attempt >= retries) return res // caller checks res.ok
+
+      const retryAfterSec = Number(res.headers.get('retry-after')) // seconds form only
+      await res.body?.cancel()                                     // free the connection
+      await sleep(retryAfterSec > 0 ? Math.min(retryAfterSec * 1000, maxDelayMs) : backoff(attempt), signal)
+    } catch (err) {
+      if (signal?.aborted) throw err   // the caller cancelled: never retry
+      if (attempt >= retries) throw err // TypeError (network) or TimeoutError, out of attempts
+      await sleep(backoff(attempt), signal)
+    }
+  }
+}
+
+// Usage in a component: cancel on unmount
+const controller = new AbortController()
+fetchWithRetry('/api/report', {}, { signal: controller.signal, retries: 2 })
+// onUnmounted(() => controller.abort())
+\`\`\`
+
+**Points to raise without being asked:**
+- **Idempotency:** retry \`GET\`/\`PUT\`/\`DELETE\` freely. Retry \`POST\` only with an \`Idempotency-Key\` header the server honours; otherwise a timeout after the server committed creates a duplicate order.
+- **Timeout vs cancel:** a timeout raises a \`TimeoutError\` \`DOMException\` and is retryable; a user abort is final. Checking \`signal.aborted\` tells them apart.
+- **Request bodies:** a \`ReadableStream\` body cannot be sent twice; strings, \`FormData\` and \`Blob\` can.
+- **Jitter** prevents a thundering herd when a server recovers. Also cap the total time, not only the attempt count, for user-facing calls.`,
+          walkthrough: [
+            {
+              title: 'Classify the outcomes',
+              body: `Final: \`res.ok\`, 4xx other than 408/429, the caller aborted, or attempts exhausted. Retryable: network \`TypeError\`, per-attempt timeout, 408, 429, 5xx.`,
+            },
+            {
+              title: 'Wire the signals',
+              body: `Each attempt gets \`AbortSignal.timeout(timeoutMs)\`, combined with the caller's signal via \`AbortSignal.any([...])\`. Pass that to \`fetch\`.`,
+            },
+            {
+              title: 'Write an abortable backoff',
+              body: `Delay \`random() * min(max, base * 2 ** attempt)\` (full jitter), or \`Retry-After\` when present. \`sleep(ms, signal)\` clears its timer and rejects on abort, so cancel works between attempts too.`,
+            },
+            {
+              title: 'Assemble the loop',
+              body: `\`for (attempt = 0; ; attempt++)\` with \`try { fetch; return or sleep } catch { rethrow if aborted or exhausted; sleep }\`. Cancel unused bodies with \`res.body?.cancel()\`.`,
+            },
+            {
+              title: 'Raise idempotency',
+              body: `Say that POST retries need an \`Idempotency-Key\`, and that stream bodies cannot be replayed. This is what separates a senior-sounding answer.`,
+            },
+          ],
+          keyPoints: [
+            'Per-attempt timeout combined with caller signal (AbortSignal.any)',
+            'Retry only network errors, timeouts, 408/429/5xx',
+            'Exponential backoff, capped, with jitter; honour Retry-After',
+            'Caller abort is final, including during the sleep',
+            'Non-idempotent requests need an Idempotency-Key',
+          ],
+          pitfalls: [
+            'One timeout for the whole operation, so a slow first attempt eats all retries',
+            'Retrying 400/401/404, which never succeed',
+            'A sleep that ignores abort, so cancelled requests keep retrying',
+            'Expecting fetch to reject on HTTP 500 (it resolves)',
+          ],
+          followUps: [
+            'Where would a circuit breaker fit, and how is it different from retries?',
+            'How would TanStack Query or Vue Query retry settings replace parts of this?',
+          ],
+          personalAngle: 'Your scraping jobs had recovery and restart logic; describe which failures you retried, how you spaced the retries, and which errors you treated as final.',
+          references: [
+            { label: 'MDN: AbortSignal.any()', url: 'https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/any_static' },
+          ],
+        },
+        {
+          id: 'js-mc-lru-cache',
+          title: 'Implement an LRU cache with a Map',
+          type: 'coding',
+          difficulty: 'core',
+          priority: 'should',
+          tags: ['machine-coding', 'lru', 'cache', 'map', 'data-structures'],
+          estMinutes: 15,
+          roles: ['full-stack', 'frontend', 'backend'],
+          prompt: `*"Implement \`LRUCache<K, V>\` with a fixed capacity: \`get(key)\` and \`set(key, value)\` in **O(1)**. When it is full, \`set\` evicts the least recently used entry. Reading a key counts as using it."*`,
+          intent: 'Tests whether you know that a JS Map keeps insertion order and can use delete-and-reinsert to move a key to the "most recent" end. A strong answer states the complexity, handles updates to existing keys, and can explain the hash map + doubly linked list version used in other languages.',
+          hints: [
+            'You need two things: fast lookup by key, and the order of use. Which built-in JS structure gives you both?',
+            'A `Map` iterates in insertion order. How do you make an existing key the newest?',
+            'Which key is the oldest, and how do you get it without looping over the whole map?',
+            'Skeleton: `get`: if present, `delete` then `set` again and return the value. `set`: if the key exists, `delete` it; else if `size >= capacity`, `delete(this.map.keys().next().value)`; then `set`.',
+          ],
+          answer: `**Direct answer:** a \`Map\` already keeps keys in insertion order. Treat the **first** key as least recently used and the **last** as most recently used. "Touching" a key means deleting and re-inserting it. All operations are O(1).
+
+\`\`\`ts
+export class LRUCache<K, V> {
+  private map = new Map<K, V>()
+
+  constructor(private readonly capacity: number) {
+    if (!Number.isInteger(capacity) || capacity < 1) throw new RangeError('capacity must be a positive integer')
+  }
+
+  get(key: K): V | undefined {
+    if (!this.map.has(key)) return undefined
+    const value = this.map.get(key) as V // has() check: stored undefined values work too
+    this.map.delete(key)                  // move to the "most recent" end
+    this.map.set(key, value)
+    return value
+  }
+
+  set(key: K, value: V): this {
+    if (this.map.has(key)) {
+      this.map.delete(key)                // updating also counts as use
+    } else if (this.map.size >= this.capacity) {
+      const oldest = this.map.keys().next().value as K
+      this.map.delete(oldest)             // evict least recently used
+    }
+    this.map.set(key, value)
+    return this
+  }
+
+  has(key: K): boolean { return this.map.has(key) } // peek: does not change order
+  delete(key: K): boolean { return this.map.delete(key) }
+  get size(): number { return this.map.size }
+}
+
+const cache = new LRUCache<string, number>(2)
+cache.set('a', 1).set('b', 2)
+cache.get('a')       // order is now b, a
+cache.set('c', 3)    // evicts b
+console.log([...cache['map'].keys()]) // ['a', 'c']
+\`\`\`
+
+**Why it is O(1):** \`Map\` \`get\`/\`set\`/\`delete\` are O(1) on average, and \`keys().next()\` reads only the first entry.
+
+**In other languages** (or if asked to avoid Map ordering): a **hash map from key to node** plus a **doubly linked list**. Move a node to the head on access, remove from the tail on eviction, each in O(1).
+
+**Production notes:** add a TTL for staleness, and limit by total size in bytes, not entry count, when values vary a lot. In Node, the \`lru-cache\` package does both. A per-process cache is not shared between instances; use Redis for that.`,
+          walkthrough: [
+            {
+              title: 'Pick the structure',
+              body: `A \`Map\` gives O(1) lookup and remembers insertion order. First key = least recently used; last key = most recently used.`,
+            },
+            {
+              title: 'Implement get',
+              body: `If the key is missing, return \`undefined\`. Otherwise read it, \`delete\` it and \`set\` it again so it moves to the end.`,
+            },
+            {
+              title: 'Implement set with eviction',
+              body: `Existing key: delete first (update = use). New key at capacity: delete \`map.keys().next().value\`. Then \`set\`.`,
+            },
+            {
+              title: 'State complexity and alternatives',
+              body: `All O(1). Mention the hash map + doubly linked list design, TTL, size-in-bytes limits, and that the cache is per process.`,
+            },
+          ],
+          keyPoints: [
+            'Map insertion order models recency',
+            'delete + set moves a key to most recent',
+            'Evict map.keys().next().value',
+            'Updates count as use; capacity validated',
+            'Knows the hash map + doubly linked list version',
+          ],
+          pitfalls: [
+            'Evicting on update of an existing key when full',
+            'Using an array and indexOf, which is O(n)',
+            'Checking `if (map.get(k))`, which breaks for falsy values',
+          ],
+          followUps: [
+            'Add a TTL per entry. Do you expire lazily on get or with a timer?',
+            'How would you share this cache across several Node instances?',
+          ],
+          references: [
+            { label: 'MDN: Map', url: 'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map' },
+          ],
+        },
+      ],
+    },
   ],
 }
 
