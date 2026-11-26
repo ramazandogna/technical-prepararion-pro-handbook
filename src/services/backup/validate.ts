@@ -12,6 +12,7 @@ import {
   type ProgressStatus,
   type ReviewGrade,
 } from '@/types/progress'
+import type { RoleId, StudySession } from '@/types/session'
 
 type Obj = Record<string, unknown>
 
@@ -58,7 +59,29 @@ export function normalizeProgressRecord(raw: unknown): ProgressRecord | null {
     lastSeenAt: r.lastSeenAt,
     completedAt: r.completedAt,
     updatedAt: r.updatedAt,
+    ...(Array.isArray(r.stamps)
+      ? { stamps: [...new Set(r.stamps.filter((x): x is string => isStr(x) && /^[a-z]+-\d{1,3}$/.test(x)))].slice(0, 100) }
+      : {}),
   }
+}
+
+const ROLES: readonly RoleId[] = ['fullstack', 'frontend', 'backend', 'software-engineer', 'pm']
+
+/** A persisted / imported study session, or null when absent or invalid. */
+export function normalizeSession(raw: unknown): StudySession | null {
+  if (!isObj(raw)) return null
+  if (!isStr(raw.role) || !ROLES.includes(raw.role as RoleId)) return null
+  if (!isStr(raw.date) || !DATE_KEY.test(raw.date)) return null
+  if (!isIso(raw.startedAt) || !isIso(raw.updatedAt)) return null
+  if (!Array.isArray(raw.items) || raw.items.length > 50 || !Array.isArray(raw.done)) return null
+  const items: StudySession['items'] = []
+  for (const it of raw.items) {
+    if (!isObj(it) || !isNonEmptyStr(it.questionId) || !isNonEmptyStr(it.slotId)) return null
+    items.push({ questionId: it.questionId, slotId: it.slotId })
+  }
+  const ids = new Set(items.map((i) => i.questionId))
+  const done = [...new Set(raw.done.filter((d): d is string => isStr(d) && ids.has(d)))]
+  return { role: raw.role as RoleId, date: raw.date, items, done, startedAt: raw.startedAt, updatedAt: raw.updatedAt }
 }
 
 export function normalizeNote(raw: unknown): Note | null {

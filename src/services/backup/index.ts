@@ -6,7 +6,7 @@ import { todayKey } from 'rei-kit'
 import { allQuestionIds } from '@/content'
 import type { ActivityDay, BackupFile, Note, ProgressRecord, RestoreMode } from '@/types/progress'
 import { activityRepo, clearAllData, metaRepo, notesRepo, progressRepo, writeBatch } from '@/services/storage'
-import { reloadStores, useNotesStore, useProgressStore, useSettingsStore } from '@/stores'
+import { reloadStores, useNotesStore, useProgressStore, useSessionStore, useSettingsStore } from '@/stores'
 import {
   isIso,
   isObj,
@@ -15,6 +15,7 @@ import {
   normalizeList,
   normalizeNote,
   normalizeProgressRecord,
+  normalizeSession,
   normalizeSettings,
 } from './validate'
 
@@ -52,7 +53,8 @@ export async function createBackup(): Promise<BackupFile> {
   const progress = useProgressStore()
   const notes = useNotesStore()
   const settings = useSettingsStore()
-  await Promise.all([progress.init(), notes.init(), settings.init()])
+  const session = useSessionStore()
+  await Promise.all([progress.init(), notes.init(), settings.init(), session.init()])
   // Export in-memory state: it is what the user sees, even if a write failed.
   // JSON round-trip, not structuredClone: store state is reactive Proxies, which structuredClone rejects.
   return jsonClone({
@@ -63,6 +65,7 @@ export async function createBackup(): Promise<BackupFile> {
     notes: Object.values(notes.notes),
     activity: Object.values(progress.activity).sort((a, b) => a.date.localeCompare(b.date)),
     settings: { ...settings.settings },
+    session: session.session,
   }) as BackupFile
 }
 
@@ -154,6 +157,7 @@ export function parseBackup(text: string): ParseResult {
     notes: notes.items,
     activity: activity.items,
     settings: normalizeSettings(obj.settings),
+    session: normalizeSession(obj.session),
   }
   return {
     ok: true,
@@ -183,15 +187,23 @@ export async function restoreBackup(input: BackupFile, mode: RestoreMode): Promi
       progress: data.progress,
       notes: data.notes,
       activity: data.activity,
-      meta: [['settings', normalizeSettings(data.settings)]],
+      meta: [
+        ['settings', normalizeSettings(data.settings)],
+        ['session', data.session ?? null],
+      ],
     })
   } else {
-    const [curProgress, curNotes, curActivity, curSettingsRaw] = await Promise.all([
+    const [curProgress, curNotes, curActivity, curSettingsRaw, curSessionRaw] = await Promise.all([
       progressRepo.all(),
       notesRepo.all(),
       activityRepo.all(),
       metaRepo.get('settings'),
+      metaRepo.get('session'),
     ])
+    const curSession = normalizeSession(curSessionRaw)
+    const incomingSession = data.session ?? null
+    const session =
+      incomingSession && (!curSession || newerByUpdatedAt(incomingSession, curSession)) ? incomingSession : curSession
     const progress = mergeNewer<ProgressRecord>(curProgress, data.progress, (r) => r.questionId)
     const notes = mergeNewer<Note>(curNotes, data.notes, (n) => n.questionId)
     const days = new Map<string, ActivityDay>(curActivity.map((d) => [d.date, d]))
@@ -215,7 +227,10 @@ export async function restoreBackup(input: BackupFile, mode: RestoreMode): Promi
       progress,
       notes,
       activity,
-      meta: [['settings', { ...curSettings, lastBackupAt }]],
+      meta: [
+        ['settings', { ...curSettings, lastBackupAt }],
+        ['session', session],
+      ],
     })
   }
   await reloadStores()

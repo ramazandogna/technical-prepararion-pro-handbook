@@ -10,7 +10,7 @@ export type RecordStoreName = keyof RecordStoreMap
 export type StoreName = RecordStoreName | 'meta'
 
 /** Keys used in the out-of-line `meta` key-value store. */
-export type MetaKey = 'settings' | 'schemaVersion'
+export type MetaKey = 'settings' | 'schemaVersion' | 'session'
 
 /** A multi-store write applied atomically (one IndexedDB transaction). */
 export interface WriteBatch {

@@ -1,3 +1,5 @@
+import type { StudySession } from './session'
+
 /**
  * PERSISTENCE CONTRACT — owned by the Team Lead; implemented by the Data/Persistence engineer.
  * All user data is local (IndexedDB). Records reference content by Question.id only.
@@ -27,6 +29,8 @@ export interface ProgressRecord {
   lastSeenAt: string | null
   completedAt: string | null
   updatedAt: string
+  /** "learned" stamps the learner pressed on this question: 'step-<i>' (walkthrough) and 'kp-<i>' (key points). */
+  stamps?: string[]
 }
 
 export interface Note {
@@ -72,6 +76,8 @@ export interface BackupFile {
   notes: Note[]
   activity: ActivityDay[]
   settings: AppSettings
+  /** the study session in progress (optional; absent in older backups) */
+  session?: StudySession | null
 }
 
 export type RestoreMode = 'merge' | 'replace'

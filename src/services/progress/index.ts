@@ -112,3 +112,14 @@ export function applyStatus(record: ProgressRecord, status: ProgressStatus, now:
 export function isDue(record: ProgressRecord, now: Date): boolean {
   return record.nextReviewAt !== null && Date.parse(record.nextReviewAt) <= now.getTime()
 }
+
+/**
+ * A question is closed when every required "learned" stamp is pressed and the last self-grade
+ * was Good or Easy — or it is already mastered.
+ */
+export function isClosed(record: ProgressRecord, required: readonly string[]): boolean {
+  if (record.status === 'mastered') return true
+  const have = new Set(record.stamps ?? [])
+  const stamped = required.every((s) => have.has(s))
+  return stamped && (record.lastGrade === 'good' || record.lastGrade === 'easy')
+}

@@ -122,6 +122,16 @@ export const useProgressStore = defineStore('progress', () => {
     await write(id, (r, at) => ({ ...touch(r, at), answerRevealed: true }))
   }
 
+  /** Press or lift a "learned" stamp ('step-<i>' / 'kp-<i>'). Pressing counts as engaging with the question. */
+  async function toggleStamp(id: string, stampId: string): Promise<void> {
+    await write(id, (r, at) => {
+      const current = new Set(r.stamps ?? [])
+      if (current.has(stampId)) current.delete(stampId)
+      else current.add(stampId)
+      return { ...touch(r, at), stamps: [...current] }
+    })
+  }
+
   async function toggleBookmark(id: string): Promise<void> {
     await write(id, (r, at) => ({ ...r, bookmarked: !r.bookmarked, updatedAt: at.toISOString() }))
   }
@@ -226,6 +236,7 @@ export const useProgressStore = defineStore('progress', () => {
     revealHint,
     revealAnswer,
     toggleBookmark,
+    toggleStamp,
     grade,
     resetQuestion,
     recordActivity,
