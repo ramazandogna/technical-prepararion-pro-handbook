@@ -64,7 +64,7 @@ async function start(fresh = false) {
       <span class="text-xs text-ink-soft tabular-nums">{{ done }} / {{ total }} done in this session</span>
     </div>
 
-    <footer class="mt-auto flex flex-wrap items-center gap-3">
+    <footer v-if="!soon" class="mt-auto flex flex-wrap items-center gap-3">
       <BaseButton
         variant="primary"
         size="lg"

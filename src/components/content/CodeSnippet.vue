@@ -12,7 +12,7 @@ const props = withDefaults(
     label?: string
     wrap?: boolean
   }>(),
-  { language: 'plaintext', label: 'Code sample', wrap: false },
+  { language: 'plaintext', label: 'Code sample', wrap: true },
 )
 
 const shortNames: Record<string, string> = {
