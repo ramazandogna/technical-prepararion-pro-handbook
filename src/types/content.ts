@@ -25,6 +25,7 @@ export type TrackId =
   | 'testing' // R  (testing concepts & quality)
   | 'behavioral' // S  (behavioral + project deep dives, personalized)
   | 'japan-career' // T  (Tokyo market, English/Japanese processes, recruiter screens)
+  | 'ai-engineering' // U  (AI-era full-stack: LLM features, AI-assisted dev, AI in the interview)
 
 export type QuestionType =
   | 'concept' // explain / compare / define
@@ -65,6 +66,14 @@ export interface Reference {
   url: string
 }
 
+/** One step of the guided model answer. The learner stamps "learned" after each step. */
+export interface WalkthroughStep {
+  /** Short imperative title, e.g. "Pick the data structure". */
+  title: string
+  /** Markdown. Explains this step only; fenced code allowed. */
+  body: string
+}
+
 export interface Question {
   /** Globally unique, stable, kebab-case, prefixed by track short code, e.g. 'js-closure-counter'. NEVER rename once shipped (progress is keyed by it). */
   id: string
@@ -84,10 +93,20 @@ export interface Question {
   code?: CodeSnippet
   /** Required when type === 'multiple-choice'. */
   choices?: Choice[]
-  /** Progressive hints, gentle → strong. 1–3 items. */
+  /**
+   * What the interviewer is really testing and what a strong answer must do — 1–3 sentences.
+   * Shown as the first rung of the hint ladder ("Goal") and at the top of the answer.
+   */
+  intent?: string
+  /** Progressive hints, gentle → strong; each one gets closer; the last is a near-solution (e.g. a code skeleton). 2–4 items. */
   hints: string[]
   /** Markdown model answer. Fenced code blocks allowed (```ts). */
   answer: string
+  /**
+   * Guided explanation of the answer, step by step (2–6 steps). When present the answer view teaches these steps
+   * one at a time with a "learned" stamp after each; when absent it splits `answer` at its bold section headings.
+   */
+  walkthrough?: WalkthroughStep[]
   /** What the interviewer is listening for. 3–6 bullets. */
   keyPoints: string[]
   /** Common wrong answers / traps. */

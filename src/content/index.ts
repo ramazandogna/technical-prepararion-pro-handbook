@@ -23,8 +23,9 @@ import tQ from './tracks/security'
 import tR from './tracks/testing'
 import tS from './tracks/behavioral'
 import tT from './tracks/japan-career'
+import tU from './tracks/ai-engineering'
 
-export const tracks: readonly Track[] = [tA, tB, tC, tD, tE, tF, tG, tH, tI, tJ, tK, tL, tM, tN, tO, tP, tQ, tR, tS, tT]
+export const tracks: readonly Track[] = [tA, tB, tC, tD, tE, tF, tG, tH, tI, tJ, tK, tL, tM, tN, tO, tP, tQ, tR, tS, tT, tU]
 
 export interface QuestionEntry {
   question: Question
