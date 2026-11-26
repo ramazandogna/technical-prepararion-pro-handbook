@@ -6,6 +6,7 @@ import { GraduationCap } from 'lucide-vue-next'
 import { useProgressStore } from '@/stores/progress'
 import { NAV_ITEMS } from './nav'
 import SearchButton from './SearchButton.vue'
+import SyncStatus from '@/components/sync/SyncStatus.vue'
 
 const route = useRoute()
 const progress = useProgressStore()
@@ -20,7 +21,7 @@ const dueCount = computed(() => progress.dueIds.length)
       </span>
       <span class="min-w-0">
         <span class="text-ink block font-semibold leading-tight">Interview OS</span>
-        <span class="text-ink-soft block text-xs">Interview preparation, your way</span>
+        <span class="text-ink-soft block text-xs">Full-stack interview prep</span>
       </span>
     </RouterLink>
 
@@ -50,6 +51,6 @@ const dueCount = computed(() => progress.dueIds.length)
       </ul>
     </nav>
 
-    <p class="text-ink-soft px-2 text-xs leading-relaxed">All data stays in this browser.</p>
+    <SyncStatus />
   </aside>
 </template>

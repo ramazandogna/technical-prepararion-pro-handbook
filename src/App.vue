@@ -4,13 +4,17 @@ import { BaseAlert, BaseButton, ToastHost } from 'rei-kit'
 import { SkipLink } from 'rei-kit/web'
 import AppLayout from '@/app/layouts/AppLayout.vue'
 import { initStores, reloadStores, useNotesStore, useProgressStore, useSettingsStore } from '@/stores'
+import { useSyncStore } from '@/stores/sync'
+import SyncGate from '@/components/sync/SyncGate.vue'
 
 const progress = useProgressStore()
 const notes = useNotesStore()
 const settings = useSettingsStore()
 
+const sync = useSyncStore()
+
 onMounted(() => {
-  void initStores()
+  void initStores().then(() => sync.boot())
 })
 
 function retry() {
@@ -21,6 +25,8 @@ const storeError = computed(() => progress.error ?? notes.error ?? settings.erro
 </script>
 
 <template>
+  <SyncGate v-if="sync.mode === 'unset'" />
+  <template v-else>
   <SkipLink for="main" label="Skip to content" />
   <AppLayout>
     <template v-if="storeError" #banner>
@@ -34,5 +40,6 @@ const storeError = computed(() => progress.error ?? notes.error ?? settings.erro
       </BaseAlert>
     </template>
   </AppLayout>
+  </template>
   <ToastHost close-label="Dismiss notification" />
 </template>

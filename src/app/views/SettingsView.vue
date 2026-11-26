@@ -22,7 +22,10 @@ import {
   type ThemePreference,
 } from 'rei-kit'
 import { ResponsiveDialog } from 'rei-kit/web'
+import SyncSettings from '@/components/sync/SyncSettings.vue'
 import {
+  Flag,
+  Map as MapIcon,
   Archive,
   Check,
   Download,
@@ -195,11 +198,14 @@ async function confirmReset() {
 
 <template>
   <div class="mx-auto flex max-w-3xl flex-col gap-6">
-    <PageTitle title="Settings" description="Appearance, learning preferences and your local data." />
+    <PageTitle title="Settings" description="Sync code, appearance, learning preferences and your data." />
+
+    <SyncSettings />
 
     <SettingsGroup title="More" class="lg:hidden">
+      <SettingsRow label="Today's session" description="Your current study set" :icon="Flag" interactive @click="router.push('/session')" />
+      <SettingsRow label="Tracks" description="Browse the curriculum by topic" :icon="MapIcon" interactive @click="router.push('/roadmap')" />
       <SettingsRow label="Notes" description="Everything you have written" :icon="NotebookPen" interactive @click="router.push('/notes')" />
-      <SettingsRow label="About" description="Research, interview stages and sources" :icon="Info" interactive @click="router.push('/about')" />
     </SettingsGroup>
 
     <SettingsGroup title="Appearance">

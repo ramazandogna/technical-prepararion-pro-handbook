@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { BaseBadge, BaseCard, formatDate } from 'rei-kit'
 import { BaseAccordion } from 'rei-kit/web'
-import { ExternalLink, Lock, Repeat, Route, Sparkles } from 'lucide-vue-next'
+import { ExternalLink, Lock, Mail, Repeat, Route, Sparkles } from 'lucide-vue-next'
 import type { CompanyType, ResearchSource } from '@/types/content'
 import { research } from '@/content/meta/research'
 import MarkdownContent from '@/components/content/MarkdownContent.vue'
@@ -33,10 +33,10 @@ const reviewed = computed(() => {
 })
 
 const howItWorks = [
-  { icon: Route, title: 'A roadmap, not a pile', body: 'Twenty tracks in four phases, ordered so each builds on the last.' },
+  { icon: Route, title: 'One button a day', body: 'Pick a role and press Start. A hiring panel decided the daily mix: algorithms first, then the topics that role is tested on.' },
   { icon: Sparkles, title: 'Active recall', body: 'Answer first, use hints only when stuck, then compare with a model answer and the key points an interviewer listens for.' },
   { icon: Repeat, title: 'Spaced review', body: 'Your self-grade (Again, Hard, Good, Easy) sets when a question comes back. Hard ones return sooner.' },
-  { icon: Lock, title: 'Private by design', body: 'No account and no server. Progress and notes live in IndexedDB in this browser; export a backup to move or keep them.' },
+  { icon: Lock, title: 'Private by design', body: 'No account. Progress lives in this browser; with a personal sync code an encrypted copy follows you to every device.' },
 ]
 </script>
 
@@ -153,9 +153,36 @@ const howItWorks = [
           <div>
             <h2 id="privacy-title" class="text-ink font-semibold">Privacy</h2>
             <p class="text-ink-soft mt-1 text-sm leading-relaxed">
-              Interview OS has no backend. Your progress, notes and settings never leave this device unless you export a
-              backup yourself. Clearing site data in your browser deletes them, so export a backup now and then.
+              Interview OS has no backend of its own. Progress lives in this browser (IndexedDB). If you set a sync code,
+              an end-to-end encrypted copy (AES-GCM, key derived from your code) is stored on textdb.dev — without the
+              code it is unreadable. Exporting a JSON backup still works any time.
             </p>
+          </div>
+        </div>
+      </BaseCard>
+    </section>
+
+    <section aria-labelledby="credits-title">
+      <BaseCard padding="lg">
+        <div class="flex gap-3">
+          <Mail class="text-primary mt-0.5 size-5 shrink-0" aria-hidden="true" />
+          <div class="flex flex-col gap-1">
+            <h2 id="credits-title" class="text-ink font-semibold">Credits &amp; contact</h2>
+            <p class="text-ink-soft text-sm">Built by Ramazan.</p>
+            <p class="text-ink-soft text-sm">
+              Requests and questions:
+              <span class="text-ink font-mono select-all">doganrmzn40 [ @ ] gmail [ . ] com</span>
+            </p>
+            <a
+              href="https://github.com/ramazandogna"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-primary focus-ring inline-flex items-center gap-1 self-start rounded text-sm underline underline-offset-2"
+            >
+              github.com/ramazandogna
+              <ExternalLink class="size-3.5" aria-hidden="true" />
+              <span class="sr-only">(opens in a new tab)</span>
+            </a>
           </div>
         </div>
       </BaseCard>

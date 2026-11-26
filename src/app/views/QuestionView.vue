@@ -16,6 +16,7 @@ import MultipleChoice from '@/components/questions/MultipleChoice.vue'
 import SelfGrade from '@/components/questions/SelfGrade.vue'
 import NotesEditor from '@/components/questions/NotesEditor.vue'
 import QuestionStatusBar from '@/components/questions/QuestionStatusBar.vue'
+import SessionBar from '@/components/questions/SessionBar.vue'
 import { isActivationOnControl, isTypingContext } from '@/components/questions/learning'
 
 const route = useRoute()
@@ -44,7 +45,7 @@ const answerOpen = computed(() => answer.value?.isOpen ?? false)
 const gradeHint = computed(() => {
   const total = question.value?.keyPoints.length ?? 0
   const covered = answer.value?.coveredCount ?? 0
-  return total && covered ? `You ticked ${covered} of ${total} key points.` : undefined
+  return total && covered ? `You stamped ${covered} of ${total} key points.` : undefined
 })
 
 /* ---------- Think-first timer (counts down from estMinutes) ---------- */
@@ -136,6 +137,7 @@ const shortcuts: { keys: string; label: string }[] = [
 <template>
   <div v-if="entry && question" class="flex flex-col gap-5">
     <BaseBreadcrumb :items="crumbs" label="Breadcrumb" />
+    <SessionBar :question-id="question.id" placement="top" />
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18.5rem] lg:items-start xl:grid-cols-[minmax(0,1fr)_20rem]">
       <!-- Main learning flow -->
@@ -189,8 +191,25 @@ const shortcuts: { keys: string; label: string }[] = [
           </div>
         </div>
 
-        <BaseCard v-if="question.hints.length" padding="md" class="max-sm:!p-4">
-          <HintLadder ref="hintLadder" :key="question.id" :question-id="question.id" :hints="question.hints" />
+        <BaseCard v-if="!isMcq" padding="md" class="max-sm:!p-4">
+          <div class="flex flex-col gap-2">
+            <h2 class="flex items-center gap-2 text-sm font-semibold text-ink">
+              <NotebookPen class="size-4 text-ink-soft" aria-hidden="true" />
+              Your attempt
+            </h2>
+            <p class="text-xs text-ink-soft">Write your approach or code here before opening hints — it is saved as your note.</p>
+            <NotesEditor :question-id="question.id" />
+          </div>
+        </BaseCard>
+
+        <BaseCard v-if="question.hints.length || question.intent" padding="md" class="max-sm:!p-4">
+          <HintLadder
+            ref="hintLadder"
+            :key="question.id"
+            :question-id="question.id"
+            :hints="question.hints"
+            :intent="question.intent"
+          />
         </BaseCard>
 
         <BaseCard padding="lg" class="max-sm:!p-4">
@@ -200,6 +219,8 @@ const shortcuts: { keys: string; label: string }[] = [
         <BaseCard v-if="answerOpen" padding="md" class="max-sm:!p-4">
           <SelfGrade :key="question.id" :question-id="question.id" :hint="gradeHint" />
         </BaseCard>
+
+        <SessionBar :question-id="question.id" placement="bottom" />
 
         <nav class="flex flex-col gap-2 sm:flex-row sm:justify-between" aria-label="Question navigation">
           <BaseButton
@@ -238,7 +259,7 @@ const shortcuts: { keys: string; label: string }[] = [
           <QuestionStatusBar ref="statusBar" :question-id="question.id" />
         </BaseCard>
 
-        <BaseCard padding="md">
+        <BaseCard v-if="isMcq" padding="md">
           <div class="flex flex-col gap-3">
             <h2 class="flex items-center gap-2 text-sm font-semibold text-ink">
               <NotebookPen class="size-4 text-ink-soft" aria-hidden="true" />

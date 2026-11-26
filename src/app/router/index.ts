@@ -6,7 +6,7 @@ declare module 'vue-router' {
     /** Page title; becomes "X · Interview OS". */
     title?: string
     /** Which primary nav item is highlighted. */
-    nav?: 'dashboard' | 'roadmap' | 'review' | 'library' | 'notes' | 'settings' | 'about'
+    nav?: 'dashboard' | 'session' | 'roadmap' | 'review' | 'library' | 'notes' | 'settings' | 'about'
   }
 }
 
@@ -17,7 +17,13 @@ const routes: RouteRecordRaw[] = [
     path: '/',
     name: 'dashboard',
     component: () => import('../views/DashboardView.vue'),
-    meta: { title: 'Dashboard', nav: 'dashboard' },
+    meta: { title: 'Home', nav: 'dashboard' },
+  },
+  {
+    path: '/session',
+    name: 'session',
+    component: () => import('../views/SessionView.vue'),
+    meta: { title: "Today's session", nav: 'session' },
   },
   {
     path: '/roadmap',
@@ -47,7 +53,7 @@ const routes: RouteRecordRaw[] = [
     path: '/library',
     name: 'library',
     component: () => import('../views/LibraryView.vue'),
-    meta: { title: 'Library', nav: 'library' },
+    meta: { title: 'All questions', nav: 'library' },
   },
   {
     path: '/notes',
