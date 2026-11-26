@@ -32,9 +32,41 @@ const p3 = { x: 1, y: 2, z: 3 }
 draw(p3)                    // OK
 draw({ x: 1, y: 2, z: 3 }) // Error: Object literal may only specify known properties
 \`\`\``,
+          intent:
+            'Tests whether you can define structural typing precisely and explain the excess-property check as a separate rule for fresh literals. Strong answers also cover widening, `as const` and `satisfies`, and name branded types as the escape hatch.',
           hints: [
-            'Compatibility is decided by shape, not by the name of the type.',
-            'Fresh object literals get an extra check.',
+            'Does `draw` care what the argument is *called*, or only which properties it has?',
+            'Both calls pass the same shape. What is different about the second argument: where does it come from?',
+            'A **fresh object literal** written directly at a typed position gets an extra "known properties only" check, to catch typos. A variable is not fresh.',
+            'Near-answer: "assignable if it has at least the required members" → excess property check only on fresh literals → inference examples (`let` widens, `const` keeps literals, `as const`, `satisfies`) → branded types for nominal-ish IDs.',
+          ],
+          walkthrough: [
+            {
+              title: 'Define structural typing',
+              body: 'A value is assignable to a type if it has **at least the required members with compatible types**. Names and declarations do not matter, so `{ x, y, z }` *is* a `Point`.',
+            },
+            {
+              title: 'Explain why the second call fails',
+              body: 'An **excess property check** runs only on **fresh object literals** assigned or passed directly to a typed target: an extra key there is probably a typo (`widht`). `p3` is a variable, no longer fresh, so normal structural rules apply.',
+            },
+            {
+              title: 'Show inference and widening',
+              body: `\`\`\`ts
+let a = 'hi'                 // string (widened)
+const b = 'hi'               // 'hi'
+const cfg = { mode: 'dark' } // { mode: string }
+const cfg2 = { mode: 'dark' } as const // { readonly mode: 'dark' }
+const routes = { home: '/' } satisfies Record<string, string> // checked, keys kept
+\`\`\``,
+            },
+            {
+              title: 'Edge cases and trade-offs',
+              body: 'Structural typing makes `UserId` and `OrderId` (both `string`) interchangeable; use **branded types** when that matters. Annotate boundaries (exports, public APIs, external data); let locals infer.',
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"TypeScript checks shape, not names, so p3 is a Point because it has x and y. The literal fails only because fresh literals get an excess-property check to catch typos. I infer locals, annotate boundaries, and use satisfies to check without widening."*',
+            },
           ],
           answer: `**Structural typing means a value is assignable to a type if it has at least the required members with compatible types.** Names and declarations do not matter. A \`{ x, y, z }\` object *is* a \`Point\` because it has \`x\` and \`y\`.
 
@@ -78,7 +110,14 @@ const routes = { home: '/', about: '/about' } satisfies Record<string, string>
           estMinutes: 3,
           roles: ['frontend', 'full-stack', 'backend'],
           prompt: `**When do you use \`interface\` and when \`type\`?** Is there any real difference?`,
-          hints: ['One can be reopened (merged); the other can express unions.'],
+          intent:
+            'Tests whether you know the real capability differences instead of folklore. A strong answer says they overlap for object shapes, names declaration merging (interface) and unions/mapped/conditional types (type), and argues for a consistent convention.',
+          hints: [
+            'For a plain object shape, can you write the same thing with both? Start there.',
+            'What happens if you declare `interface Window { ... }` twice? What about `type Window = ...` twice?',
+            'Try writing `\'idle\' | \'loading\'` or `{ [K in keyof T]: ... }` as an interface. Which keyword is required?',
+            'Near-answer: mostly interchangeable → interface only: declaration merging (module augmentation), `extends` errors → type only: unions, tuples, mapped/conditional/template types → pick a convention; note interfaces are not implicitly `Record<string, unknown>`-compatible.',
+          ],
           answer: `**For object shapes they are mostly interchangeable. The differences are a few capabilities, so pick one convention and use it consistently.**
 
 **Only \`interface\` can:**
@@ -147,7 +186,38 @@ One subtle difference: interfaces are not implicitly index-signature compatible,
               explanation: 'Assertions are compile-time only; nothing is checked at runtime.',
             },
           ],
-          hints: ['Which type forces you to check before use?'],
+          intent:
+            'Tests whether you treat external data as untrusted at the type level: `unknown` plus narrowing or schema validation. A strong answer also explains why `any` spreads, what `never` is for, and that `as` validates nothing at runtime.',
+          hints: [
+            'Which of these types still lets the compiler protect you after `JSON.parse`?',
+            '`any` allows every operation; `unknown` allows none until you narrow. Which is safer for data you do not control?',
+            '`never` has no values at all. And does `as ApiResponse` emit any runtime code?',
+            'Near-answer: (b). Narrow with `typeof x === \'object\' && x !== null && \'id\' in x`, or in practice `UserSchema.parse(data)`.',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate the situation',
+              body: 'The data comes from `JSON.parse` on an API you do not control, so its shape is **unproven**. The right type must let you accept anything but force you to prove the shape before use.',
+            },
+            {
+              title: 'Eliminate the wrong options',
+              body: '**any** disables checking and spreads (`x.foo.bar` is also `any`). **never** is the empty type: no value has it. **as** is compile-time only; nothing is checked at runtime. That leaves **unknown**.',
+            },
+            {
+              title: 'Show narrowing',
+              body: `\`\`\`ts
+const data: unknown = JSON.parse(text)
+if (typeof data === 'object' && data !== null && 'id' in data && typeof data.id === 'string') {
+  data.id // string
+}
+// production: const user = UserSchema.parse(data) // Zod / Valibot
+\`\`\``,
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"unknown, then narrow. It\'s the safe top type: anything goes in, nothing comes out unchecked. any switches checking off and leaks, never is the bottom type for exhaustiveness, and as is just a promise to the compiler. At API boundaries I validate with a schema."*',
+            },
+          ],
           answer: `**\`unknown\`, then narrow it.**
 
 - **\`any\`** opts out of type checking. Any operation is allowed, and it **spreads**: \`const x: any\`, then \`x.foo.bar\` is also \`any\`, so errors surface at runtime. Reserve it for migration escape hatches, and prefer \`// @ts-expect-error\` with a comment.
@@ -182,10 +252,45 @@ Use \`catch (err)\` with \`useUnknownInCatchVariables\` (part of \`strict\`), so
           estMinutes: 5,
           roles: ['frontend', 'full-stack', 'backend'],
           prompt: `Your typed \`fetchUser(): Promise<User>\` crashes in production with \`Cannot read properties of undefined\`. **Explain why TypeScript did not catch it, what TypeScript emits at runtime, and how you make API boundaries safe.**`,
+          intent:
+            'Tests whether you understand type erasure and therefore where runtime validation must live. A strong answer lists what does emit code (enums, decorators, parameter properties), validates at the edges with a schema, and derives the static type from it.',
           hints: [
-            'Types are erased.',
-            'Which TypeScript features do produce runtime code?',
-            'Validate where data enters the system.',
+            'Open the compiled JavaScript in your head: where does `Promise<User>` appear in it?',
+            'So the annotation was a claim, not a check. What could the API actually have returned (wrapped payload, error body)?',
+            'A few TypeScript features *do* emit code: `enum`, `namespace` with values, parameter properties, decorators. Everything else is erased.',
+            'Near-answer: `const User = z.object({ id: z.string(), name: z.string() }); type User = z.infer<typeof User>`; in `fetchUser`, check `res.ok`, then `return User.parse(await res.json())`.',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate the failure',
+              body: 'A function typed `Promise<User>` returned something that was not a `User`, and TypeScript did not complain. The question is why, and how to stop it happening at the boundary.',
+            },
+            {
+              title: 'Explain erasure',
+              body: 'Types are **erased** at compile time. `Promise<User>` is a promise you made to the compiler, not a runtime check. If the API sends `{ data: { user } }` or a 500 body, nothing intercepts it.',
+            },
+            {
+              title: 'Name what survives',
+              body: '`enum` (real objects), `namespace` with values, parameter properties, and decorators (NestJS DI relies on `emitDecoratorMetadata`) emit code. `interface`, `type`, generics, `as`, `satisfies` disappear. `erasableSyntaxOnly` and Node type stripping push towards erasable syntax.',
+            },
+            {
+              title: 'Build the safe boundary',
+              body: `\`\`\`ts
+import { z } from 'zod'
+const User = z.object({ id: z.string(), name: z.string() })
+type User = z.infer<typeof User>
+
+async function fetchUser(id: string): Promise<User> {
+  const res = await fetch(\`/api/users/\${id}\`)
+  if (!res.ok) throw new Error(\`HTTP \${res.status}\`)
+  return User.parse(await res.json())
+}
+\`\`\``,
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"Types are erased, so Promise<User> was a claim. I validate at every edge: responses, request bodies, storage, env. I derive the type from the schema so they can\'t drift, and inside the app I trust the types."*',
+            },
           ],
           answer: `**TypeScript's types are erased at compile time.** The output JavaScript contains no types, so \`Promise<User>\` was a *promise you made to the compiler*, not a check. If the API returns \`{ data: { user } }\` or a 500 error body, nothing stops it.
 
@@ -245,10 +350,48 @@ Inside the system, trust the types. At the boundary, prove them. Generating type
 2. \`groupBy(items, getKey)\`.
 
 Then derive a \`RouteName\` type from a runtime \`ROUTES\` object.`,
+          intent:
+            'Tests whether you can make types flow from inputs to outputs with generics, constrain them correctly, and derive types from runtime values. A strong answer uses `K extends keyof T`, `T[K]`, an honest `Partial<Record<...>>` return, and `keyof typeof`.',
           hints: [
-            'Constrain K with `extends keyof T`.',
-            'The element type is the indexed access type T[K].',
-            '`keyof typeof value` turns a runtime object into a union of its keys.',
+            '`pluck` needs two type parameters: the item type and the key type. How do you restrict the key to real keys of the item?',
+            'The result element type is "the type of property K on T". What is the indexed-access syntax for that?',
+            'For `groupBy`, the key type must be usable as an object key (`PropertyKey`). If a group can be missing, should the return type say every key exists?',
+            'Skeleton: `function pluck<T, K extends keyof T>(items: readonly T[], key: K): ___[] { return items.map((i) => i[key]) }` and `type RouteName = keyof typeof ___`',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate and clarify',
+              body: '`pluck` must reject unknown keys and return the right element type; `groupBy` must be generic over item and key; `RouteName` must come from a runtime object, so it stays in sync.',
+            },
+            {
+              title: 'Choose the type tools',
+              body: '**Constraint** `K extends keyof T` limits keys. **Indexed access** `T[K]` gives the property type. `typeof value` lifts a value into a type, `keyof` takes its keys, and `as const` keeps literal types.',
+            },
+            {
+              title: 'Build it',
+              body: `\`\`\`ts
+function pluck<T, K extends keyof T>(items: readonly T[], key: K): T[K][] {
+  return items.map((item) => item[key])
+}
+
+function groupBy<T, K extends PropertyKey>(items: readonly T[], getKey: (item: T) => K): Partial<Record<K, T[]>> {
+  const out: Partial<Record<K, T[]>> = {}
+  for (const item of items) (out[getKey(item)] ??= []).push(item)
+  return out
+}
+
+const ROUTES = { home: '/', settings: '/settings' } as const
+type RouteName = keyof typeof ROUTES // 'home' | 'settings'
+\`\`\``,
+            },
+            {
+              title: 'Edge cases and trade-offs',
+              body: '`Record<K, T[]>` would lie when a group is empty, hence `Partial`. Each type parameter should appear at least twice (relating input to output). Prefer call-site inference over explicit `<T>`. ES2024 has `Object.groupBy` / `Map.groupBy`.',
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"K extends keyof T restricts the key, and T[K] carries the property type into the result. For groupBy I return Partial<Record> because some groups may not exist. And keyof typeof ROUTES with as const keeps the route names in sync with the object."*',
+            },
           ],
           answer: `**Generics let the types flow from the input to the output. Constraints restrict what callers may pass.**
 
@@ -311,9 +454,13 @@ type RoutePath = (typeof ROUTES)[RouteName] // '/' | '/settings' | '/q/:id'
           estMinutes: 5,
           roles: ['frontend', 'full-stack', 'backend'],
           prompt: `You have \`type User = { id: string; name: string; email: string; passwordHash: string; createdAt: Date }\`. **Using built-in utility types, derive:** a public user DTO, an update payload, and the type of whatever \`getUser()\` resolves to. Explain each utility type you use.`,
+          intent:
+            'Tests whether you derive DTOs from one source of truth instead of duplicating shapes, and know the sharp edges (unchecked `Omit`, union collapse, shallow `Partial`). A strong answer prefers allow-lists for public data.',
           hints: [
-            'Remove fields, make fields optional, and unwrap a Promise.',
-            'Omit, Partial, Pick, Awaited and ReturnType.',
+            'Name the three operations you need: remove a field, make some fields optional, and get the resolved type of a function.',
+            'Removing and keeping keys: `Omit` and `Pick`. Making optional: `Partial`. Getting a function\'s output: `ReturnType`, unwrapped with `Awaited`.',
+            'For the public DTO, which is safer if someone adds `ssn` to `User` next month: a deny-list (`Omit`) or an allow-list (`Pick`)?',
+            'Near-answer: `type PublicUser = Omit<User, \'passwordHash\'>`, `type UpdateUser = Partial<Pick<User, \'name\' | \'email\'>>`, `type R = Awaited<ReturnType<typeof getUser>>`.',
           ],
           answer: `**Derive related types from a single source of truth, so a change to \`User\` flows everywhere automatically.**
 
@@ -371,10 +518,47 @@ type GetUserResult = Awaited<ReturnType<typeof getUser>> // PublicUser
 3. \`Getters<T>\`: \`{ name: string }\` becomes \`{ getName: () => string }\`.
 
 Also explain why \`ToArray<string | number>\` gives \`string[] | number[]\`.`,
+          intent:
+            'Tests type-level programming fluency: conditional types with `infer`, recursive mapped types, key remapping with template literals, and distribution over unions. A strong answer explains each mechanism and argues for restraint in application code.',
           hints: [
-            'Conditional types use `T extends X ? A : B`, and `infer` captures part of a type.',
-            'Mapped types iterate with `[K in keyof T]`; `as` remaps keys.',
-            'A conditional type on a naked type parameter distributes over unions.',
+            '`ElementType`: pattern-match on "is T an array of something?" and capture that something. Which keyword captures a type inside `extends`?',
+            '`DeepReadonly`: map over `keyof T` adding `readonly`, and recurse into each property. What should happen to functions and primitives?',
+            '`Getters`: a mapped type can rename keys with `as`. Build the new key with a template literal type and `Capitalize`.',
+            'Skeleton: `type ElementType<T> = T extends readonly (infer U)[] ? U : T`; for Getters, remap each key with ``as `get${Capitalize<string & K>}` `` and give it the value type `() => ___`; for distribution compare `T extends unknown ? T[] : never` with `[T] extends [unknown] ? T[] : never`.',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate the three types',
+              body: 'Unwrap an array element (or return T), make an object readonly at every depth, and turn each key `k` into `getK: () => T[k]`. Then explain why `ToArray<string | number>` distributes.',
+            },
+            {
+              title: 'Pick the mechanisms',
+              body: '**Conditional + `infer`** for pattern-matching a type. **Mapped types** (`[K in keyof T]`) with modifiers for readonly. **Key remapping** (`as`) with **template literal types** for renamed keys.',
+            },
+            {
+              title: 'Build it',
+              body: `\`\`\`ts
+type ElementType<T> = T extends readonly (infer U)[] ? U : T
+
+type DeepReadonly<T> = T extends (...args: never[]) => unknown
+  ? T
+  : T extends object
+    ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+    : T
+
+type Getters<T> = {
+  [K in keyof T as \`get\${Capitalize<string & K>}\`]: () => T[K]
+}
+\`\`\``,
+            },
+            {
+              title: 'Explain distribution and edge cases',
+              body: 'A conditional on a **naked type parameter** is applied to each union member separately: `ToArray<string | number>` → `string[] | number[]`. Wrap in a tuple (`[T] extends [unknown]`) to stop it. Leave functions alone in `DeepReadonly`. `string & K` filters out symbol keys for `Capitalize`.',
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"Conditional types are type-level ifs, and infer captures a piece, which is how ReturnType works. Mapped types transform each key, and as lets me rename them with template literals. Distribution happens on naked type parameters; a tuple wrapper turns it off. I keep this in library code and out of app code."*',
+            },
           ],
           answer: `\`\`\`ts
 // 1. Conditional type with infer
@@ -433,10 +617,13 @@ When the checked type is a **naked type parameter**, the conditional type is app
           estMinutes: 5,
           roles: ['frontend', 'full-stack', 'backend'],
           prompt: `**How do you type a function whose return type depends on its argument?** For example, \`parse(input: string)\` returns \`number\` while \`parse(input: string[])\` returns \`number[]\`. Compare overloads, generics and union parameters, and explain why \`() => void\` accepts a function that returns a value.`,
+          intent:
+            'Tests whether you can choose between overloads, generics and unions based on how output relates to input, and know the callback rules (`void` returns, parameter bivariance, `this` parameters). Strong answers mention that overload bodies are not checked against each signature.',
           hints: [
-            'Overloads are a list of signatures plus one implementation.',
-            'A conditional return type is another option.',
-            'void in a callback type means "the return value is ignored".',
+            'Does the output type depend on the input type? If yes, a union-in/union-out signature loses information for callers.',
+            'Overloads: list the public signatures, then write one implementation signature that covers them all. Which signatures can callers see?',
+            'A generic with a conditional return type also works, but what does the body usually need to satisfy it?',
+            'Near-answer: `function parse(input: string): number; function parse(input: string[]): number[]; function parse(input: string | string[]) { ... }`. For callbacks: `() => void` means "result ignored", so returning a value is allowed.',
           ],
           answer: `**Use overloads when a small, fixed set of input types maps to different outputs. Use generics when the output follows the input's type. Use a plain union parameter when the output does not depend on the input.**
 
@@ -506,9 +693,45 @@ function emailsFrom(payload: unknown[]): string[] {
     .map((u) => u.email.toLowerCase()) // compile error here
 }`,
           },
+          intent:
+            'Tests whether you understand that narrowing is flow-based and local, so a property check inside `filter` does not change the array type, and that type predicates are unchecked promises. A strong answer fixes both bugs without `!`.',
           hints: [
-            'Does checking u.email inside filter change the type of the array elements?',
-            'What does isUser actually verify, compared with what it claims?',
+            'Hover over `users` after `.filter((u) => u.email !== undefined)`. Is its type any different from before the filter?',
+            'Narrowing inside a callback stays inside the callback. To change the *element type* of the result, `filter` needs a callback whose return type is `u is Something`.',
+            'Now the runtime bug: `isUser` claims `x is User`. Which fields does it actually check, and which field does the next line use?',
+            'Near-answer: `const hasEmail = (u: User): u is User & { email: string } => u.email !== undefined`, then `users.filter(hasEmail).map((u) => u.email.toLowerCase())`; and make `isUser` check `typeof x.name === \'string\'` too (or use a schema).',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate: two bugs',
+              body: 'One **compile** error on `u.email.toLowerCase()` and one **runtime** crash. Treat them separately: the first is about how narrowing flows, the second about what a type predicate promises.',
+            },
+            {
+              title: 'Explain the compile error',
+              body: 'Narrowing in a `filter` callback is **local** to that callback. Checking a **property** (`u.email`) does not change the element type, so the result is still `User[]` and `email` is `string | undefined`. (TS 5.5 infers predicates only when the check narrows the parameter itself.)',
+            },
+            {
+              title: 'Fix both',
+              body: `\`\`\`ts
+const hasEmail = (u: User): u is User & { email: string } => u.email !== undefined
+return users.filter(hasEmail).map((u) => u.email.toLowerCase())
+
+function isUser(x: unknown): x is User {
+  return typeof x === 'object' && x !== null &&
+    'id' in x && typeof x.id === 'string' &&
+    'name' in x && typeof x.name === 'string'
+}
+\`\`\`
+Or skip the predicate: \`users.flatMap((u) => (u.email ? [u.email.toLowerCase()] : []))\`.`,
+            },
+            {
+              title: 'Explain the runtime bug and edge cases',
+              body: '`isUser` checks only `id` but claims a full `User`. `{ id: \'1\' }` passes and `u.name.toUpperCase()` throws. The compiler **never verifies a predicate body**. `u.email!` silences the compile error but hides the problem. Narrowing also resets after reassignment or across function calls.',
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"The filter narrows inside the callback but not the array type, so I give filter a real type predicate or use flatMap. The runtime crash is because isUser lies: it checks id but promises name. Predicates are trusted, not verified, so they must check everything, or I use a schema."*',
+            },
           ],
           answer: `**Compile error:** \`'u.email' is possibly 'undefined'\`. A \`filter\` callback narrows only *inside* the callback. Checking a **property** (\`u.email\`) does not narrow the element type \`User\`, so after \`filter\` the array is still \`User[]\`. (TypeScript 5.5 infers type predicates from some callbacks, such as \`x => x !== undefined\`, but only when the check narrows the parameter itself, not one of its properties.)
 
@@ -552,9 +775,55 @@ function isUser(x: unknown): x is User {
           estMinutes: 12,
           roles: ['frontend', 'full-stack', 'backend'],
           prompt: `A component stores \`{ loading: boolean; error?: Error; data?: T }\`, and bugs appear where \`loading\` and \`error\` are both set. **Remodel the state with a discriminated union and make the render function fail to compile when someone adds a new state.**`,
+          intent:
+            'Tests state modelling: replacing independent flags with a discriminated union so illegal states cannot exist, and using `never` to make the compiler flag unhandled variants. A strong answer shows narrowing by tag and the refactor-safety payoff.',
           hints: [
-            'Give each state a literal tag field.',
-            'In the switch default branch, assign the value to never.',
+            'List the states the component can really be in. How many are there, and how many combinations do the three optional fields allow?',
+            'Give each state its own object type with a literal `status` field, and put `data` / `error` only on the states that have them.',
+            'In a `switch (state.status)`, each `case` narrows the whole object. In `default`, what type is left if every case is handled?',
+            'Skeleton: `type RemoteData<T> = { status: \'idle\' } | { status: \'loading\' } | { status: \'success\'; data: T } | { status: \'error\'; error: Error }` and `default: return assertNever(state)` with `function assertNever(x: never): never { throw ... }`',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate the problem',
+              body: '`{ loading; error?; data? }` allows contradictory combinations (loading **and** error). The goal: make only valid states representable, and make the compiler complain when a new state is not handled.',
+            },
+            {
+              title: 'Model it as a discriminated union',
+              body: 'One variant per real state, each with a **literal tag** (`status`). Fields live only on the variants that have them: `data` on `success`, `error` on `error`. Four states instead of 2⁴ combinations.',
+            },
+            {
+              title: 'Build it',
+              body: `\`\`\`ts
+type RemoteData<T> =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; data: T }
+  | { status: 'error'; error: Error }
+
+function assertNever(x: never): never {
+  throw new Error(\`Unhandled state: \${JSON.stringify(x)}\`)
+}
+
+function render<T>(state: RemoteData<T>, view: (data: T) => string): string {
+  switch (state.status) {
+    case 'idle': return ''
+    case 'loading': return 'Loading…'
+    case 'success': return view(state.data)
+    case 'error': return \`Failed: \${state.error.message}\`
+    default: return assertNever(state)
+  }
+}
+\`\`\``,
+            },
+            {
+              title: 'Edge cases and trade-offs',
+              body: 'Adding `{ status: \'refreshing\'; data: T }` makes every `assertNever` switch fail to compile: a to-do list for free. A `default` that silently returns defeats this. `satisfies never` or ESLint `switch-exhaustiveness-check` are alternatives.',
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"Booleans let impossible combinations exist, so I model each state with a literal tag. Switching on the tag narrows the object, so data is only reachable on success. The never default makes any new state a compile error until it\'s handled."*',
+            },
           ],
           answer: `**Model each valid state explicitly with a literal tag, so impossible combinations cannot be represented, and use \`never\` to force exhaustive handling.**
 
@@ -615,10 +884,13 @@ function render<T>(state: RemoteData<T>, view: (data: T) => string): string {
           estMinutes: 5,
           roles: ['frontend', 'full-stack', 'backend'],
           prompt: `**What does \`"strict": true\` actually enable**, which other flags would you add for a new project, and how do \`tsc\`, Vite/esbuild and \`vue-tsc\` divide the work?`,
+          intent:
+            'Tests whether you know what `strict` really covers, which extra flags catch real bugs, and that transpilers strip types without checking them. A strong answer ends with where type-checking actually runs (tsc / vue-tsc in CI and editor).',
           hints: [
-            'strict is a bundle of flags.',
-            'Indexed access is not checked by strict alone.',
-            'Transpilers strip types; they do not type-check.',
+            '`strict` is not one check. Name the most valuable flag inside it.',
+            'Is `arr[10]` typed as `T | undefined` under `strict` alone? Which flag changes that?',
+            'Does `vite build` fail on a type error? What does esbuild do with types?',
+            'Near-answer: strict = strictNullChecks, noImplicitAny, strictFunctionTypes, … → add noUncheckedIndexedAccess, exactOptionalPropertyTypes, verbatimModuleSyntax, isolatedModules → transpilers strip per file, `tsc --noEmit` / `vue-tsc` check in CI.',
           ],
           answer: `**\`strict\` is a bundle of flags** that are all worth having. New flags may be added to it in future versions:
 - \`strictNullChecks\`: \`null\` and \`undefined\` are separate types. This is the most valuable flag.

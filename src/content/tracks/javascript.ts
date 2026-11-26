@@ -35,10 +35,35 @@ console.log(typeof hoisted, typeof notYet)
 function hoisted() {}
 var notYet = () => {}`,
           },
+          intent:
+            'Tests whether you can trace execution order and explain it with the right vocabulary: one shared `var` binding versus a fresh `let` binding per iteration, closures capturing bindings, and what hoisting does to declarations versus `var` initialisers.',
           hints: [
-            'Synchronous code runs before any setTimeout callback.',
-            'How many bindings of i exist, compared with j?',
-            'Function declarations are hoisted with their body; var only with undefined.',
+            'Which line runs first: the `console.log(typeof ...)` or any timer callback?',
+            'Count bindings: how many `i` variables exist for the whole loop, and how many `j` variables?',
+            'Hoisting: a function declaration is hoisted with its body; a `var` is hoisted as `undefined` until its assignment line runs.',
+            'Near-answer: the first line is `function undefined`; then three lines with the same value of `i` (what is `i` after the loop ends?); then `let 0`, `let ___`, `let ___`.',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate and order the phases',
+              body: 'Split the code into **synchronous** work (the two loops register timers, then the `typeof` log) and **later** work (six timer callbacks, in registration order). So the `typeof` line prints first.',
+            },
+            {
+              title: 'Apply hoisting',
+              body: '`function hoisted() {}` is hoisted **with its body** → `function`. `var notYet` is hoisted but initialised to `undefined`; the arrow function is only assigned later → `undefined`. First line: `function undefined`.',
+            },
+            {
+              title: 'Apply closures and bindings',
+              body: '`var i` is function-scoped: **one binding**, shared by all three closures, and it is 3 when they run → `var 3` ×3. `let j` in a `for` header creates a **new binding per iteration** → `let 0`, `let 1`, `let 2`.',
+            },
+            {
+              title: 'Edge cases worth adding',
+              body: '`let`/`const` are hoisted too but sit in the **TDZ**: reading them early throws `ReferenceError`. Without `let`, fix the `var` loop with an IIFE or `setTimeout(fn, 0, i)` to pass the value in.',
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"Sync code first, so the typeof line prints function and undefined. Then the timers: the var loop shares one binding that ended at 3, and let creates a fresh binding per iteration, so 0, 1, 2. Closures capture bindings, not values."*',
+            },
           ],
           answer: `\`\`\`text
 function undefined
@@ -105,10 +130,35 @@ console.log(obj.nested())
 console.log(obj.nestedArrow())
 console.log(obj.regular.call({ name: 'other' }))`,
           },
+          intent:
+            'Tests whether you apply the call-site rules for `this` mechanically (new, explicit, implicit, default) and know that arrow functions skip them and use lexical `this`. A strong answer explains each line by naming the rule that applies.',
           hints: [
-            'For regular functions, this depends on how the function is called, not where it is defined.',
-            'Arrow functions have no this of their own; they use the this of the enclosing scope.',
-            'At the top level of a module, this is undefined.',
+            'For a regular function, look at the **call site**: what is to the left of the dot when it is called?',
+            'Destructuring `regular` out of `obj` and calling it bare: which rule applies, and what is the default in strict mode?',
+            'Arrow functions have no own `this`. For `arrow`, what is `this` at the top level of an ES module? (An object literal is not a scope.)',
+            'Near-answer: `obj`, `undefined`, `undefined`, then the regular callback passed to `map` gets `this = ___`, the arrow callback inherits from `nestedArrow()` → `___`, and `.call` sets it to `___`.',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate the rules',
+              body: 'For regular functions `this` is decided **at call time**, by precedence: `new` > explicit (`call`/`apply`/`bind`) > implicit (`obj.fn()`) > default (`undefined` in strict mode). Arrow functions ignore all of this and use **lexical** `this`.',
+            },
+            {
+              title: 'Lines 1–3',
+              body: '`obj.regular()` → implicit → `obj`. `regular()` → bare call, receiver lost → `undefined` (the `?.` prevents a throw). `obj.arrow()` → arrow defined at module top level, where `this` is `undefined` → `undefined`.',
+            },
+            {
+              title: 'Lines 4–6',
+              body: '`nested`: the inner `function` is called by `map` with no `thisArg` → `undefined`. `nestedArrow`: the inner arrow inherits `this` from `nestedArrow()`, called as `obj.nestedArrow()` → `obj`. `.call({ name: \'other\' })` → explicit → `other`.',
+            },
+            {
+              title: 'Practical edge cases',
+              body: 'Passing `obj.handle` as a callback loses `this`; use `.bind(obj)` or an arrow wrapper. `bind` on an arrow function does nothing to `this`. Binding twice keeps the first binding. In DOM `function` listeners, `this` is `currentTarget`.',
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"I look at each call site. Method call gives obj, the bare call loses the receiver so undefined in strict mode, and arrows take this from where they were defined: module top level is undefined, inside nestedArrow it\'s obj. call overrides with other."*',
+            },
           ],
           answer: `\`\`\`text
 obj
@@ -158,9 +208,13 @@ other
           estMinutes: 5,
           roles: ['frontend', 'full-stack'],
           prompt: `**Explain the prototype chain.** What is the difference between \`prototype\` and \`__proto__\`, and what does \`class\` actually do?`,
+          intent:
+            'Tests whether you understand inheritance as delegation through linked objects rather than copying, and can separate `Fn.prototype` from an instance\'s `[[Prototype]]`. Strong answers trace a concrete chain and note what `class` adds beyond syntax.',
           hints: [
-            'Property lookup walks a chain of linked objects.',
-            'One of them is a property of functions; the other is the internal link of every object.',
+            'When you read `d.speak` and `d` has no own `speak`, where does the engine look next?',
+            'Every object has one hidden link. Functions additionally have a normal property. Which is which: `__proto__` or `prototype`?',
+            '`new Dog()` sets the new object\'s `[[Prototype]]` to `Dog.prototype`. `extends` links `Dog.prototype` to `Animal.prototype`.',
+            'Near-answer: draw `d → Dog.prototype → Animal.prototype → Object.prototype → null`, then list what `class` adds: strict mode, must use `new`, `super`, `#private`, TDZ.',
           ],
           answer: `Every object has an internal \`[[Prototype]]\` link to another object (or \`null\`). **When you read a property, the engine checks the object itself, then follows \`[[Prototype]]\` up the chain until it finds the property or reaches \`null\`.** That is the prototype chain, and it is how JavaScript implements inheritance.
 
@@ -244,7 +298,32 @@ Object.hasOwn(d, 'speak') // false (inherited)
               explanation: 'Objects are compared by reference, and these are two different objects.',
             },
           ],
-          hints: ['== converts both sides through ToPrimitive and then to numbers in most cases.', 'Objects are never compared by content.'],
+          intent:
+            'Tests precise knowledge of `==` conversion rules, the `NaN` and `-0` edge cases, and reference equality. A strong answer explains each option by the rule that decides it and separates truthiness from loose equality.',
+          hints: [
+            'Take each option on its own and ask: does this operator convert types at all?',
+            'For `==` with an object and a boolean: the boolean becomes a number, the object goes through `ToPrimitive` (`[]` → `""` → 0).',
+            '`null == x` has a special rule: it is true only for `null` and `undefined`. And what is the one value not equal to itself under `===`?',
+            'Near-answer: (a) 0 == 0, (b) special null rule, (c) NaN rule, (d) SameValue treats NaN as equal, (e) two distinct object references. Two are true.',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate the rules',
+              body: '`===` never converts. `==` converts: `null == undefined` only; booleans → numbers; objects → `ToPrimitive` (`valueOf`, then `toString`). `Object.is` is `===` except `NaN` equals `NaN` and `+0` ≠ `-0`.',
+            },
+            {
+              title: 'Walk each option',
+              body: '**a** `[] == false`: `false` → 0, `[]` → `""` → 0 → **true**. **b** `null == 0`: null only loosely equals undefined → false. **c** `NaN === NaN` → false. **d** `Object.is(NaN, NaN)` → **true**. **e** two different objects → false.',
+            },
+            {
+              title: 'Connect to reference semantics',
+              body: 'Objects compare by identity. Spread is a **shallow** copy (nested objects shared); `structuredClone` is deep. That is why frameworks need immutable updates or proxies to notice changes.',
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"a and d. The empty array is truthy, but == doesn\'t use truthiness: both sides go to 0. null only equals undefined loosely. NaN isn\'t equal to itself except under Object.is, which React uses. Objects compare by reference. In code I use === everywhere, plus x == null as a nullish check."*',
+            },
+          ],
           answer: `**a and d are true.**
 
 **Loose equality (\`==\`)** applies conversion rules: \`null == undefined\` is true (and neither equals anything else); booleans become numbers; objects go through \`ToPrimitive\` (\`valueOf\` and then \`toString\`), so \`[]\` becomes \`""\` and then 0. This is why \`[] == false\` is true even though \`[]\` is *truthy*: truthiness and \`==\` are different rules.
@@ -304,10 +383,35 @@ queueMicrotask(() => console.log('5'))
 })()
 console.log('8')`,
           },
+          intent:
+            'The classic event-loop trace. The interviewer wants the exact order and, more importantly, the model behind it: sync code first (including the start of an async function), then the whole microtask queue in FIFO order, then one macrotask.',
           hints: [
-            'An async function runs synchronously until its first await.',
-            'All microtasks run before the next macrotask.',
-            'A chained .then is only queued once the previous one has run.',
+            'First list only the synchronous logs. Remember an async function runs synchronously until its first `await`.',
+            'Now write the microtask queue in the order items are **added**: which callbacks are queued during the synchronous phase?',
+            'A chained `.then(4)` is not queued up front; it is queued only when `.then(3)` finishes. Timers wait until the microtask queue is empty.',
+            'Near-answer: sync = `1 6 8`; microtasks queued = `[3, 5, 7]`, and running 3 appends ___; macrotask last = ___.',
+          ],
+          walkthrough: [
+            {
+              title: 'Run the synchronous phase',
+              body: 'Logs `1`. Registers the timer. `Promise.resolve().then(3)` **queues** 3 (the promise is already resolved). `queueMicrotask` queues 5. The async IIFE logs `6` and `await null` queues its continuation 7. Logs `8`. So far: **1 6 8**.',
+            },
+            {
+              title: 'Drain the microtask queue',
+              body: 'Queue is `[3, 5, 7]`. Run 3 → its returned promise resolves → **4 is appended** → `[5, 7, 4]`. Run 5, 7, 4. All microtasks drain, including ones added during draining: **3 5 7 4**.',
+            },
+            {
+              title: 'Run the next macrotask',
+              body: 'Only now does the timer callback run: **2**. Final: `1 6 8 3 5 7 4 2`.',
+            },
+            {
+              title: 'Model and edge cases',
+              body: 'Microtasks: promise reactions, `await` continuations, `queueMicrotask`, `MutationObserver`. Macrotasks: timers, I/O, events. Browsers can render **between** tasks, never mid-drain. Node: `process.nextTick` runs before promise microtasks; libuv runs phases.',
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"Sync first: 1, 6 because the async function runs until await, then 8. Then the whole microtask queue in order, 3, 5, 7, and 4 joins the end once 3 resolves. Then one macrotask: the timer, 2."*',
+            },
           ],
           answer: `\`\`\`text
 1 6 8 3 5 7 4 2
@@ -348,9 +452,40 @@ console.log('8')`,
           estMinutes: 5,
           roles: ['frontend', 'full-stack', 'backend'],
           prompt: `A dashboard loads user, orders and recommendations in parallel. **Which Promise combinator do you use, and how do you handle errors?** Compare \`all\`, \`allSettled\`, \`race\` and \`any\`.`,
+          intent:
+            'Tests whether you pick combinators by failure semantics, not by habit. A strong answer splits critical and optional data, knows that a rejection does not cancel the other promises, and reaches for AbortSignal for real cancellation and timeouts.',
           hints: [
-            'Is the page useless if recommendations fail?',
-            'Does a rejection in Promise.all cancel the other requests?',
+            'Ask the product question first: is the page useless if recommendations fail? If not, should their failure fail everything?',
+            'Map each combinator to "resolves when" and "rejects when". Which one never rejects?',
+            'When `Promise.all` rejects early, are the other `fetch` calls stopped? What would actually stop them?',
+            'Near-answer: `const [user, orders] = await Promise.all([...critical])`; `const [recs] = await Promise.allSettled([...optional])`; use `recs.status === \'fulfilled\' ? recs.value : []`; timeouts via `AbortSignal.timeout(ms)`.',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate and clarify',
+              body: 'Three parallel loads; the question is **what happens when one fails**. Ask which parts the page cannot render without. Usually user and orders are critical, recommendations are optional.',
+            },
+            {
+              title: 'Map combinators to failure semantics',
+              body: '`all`: fulfils with all results in order, rejects on the **first** rejection. `allSettled`: never rejects, gives `{ status, value | reason }`. `race`: first to settle either way (timeouts). `any`: first to fulfil, `AggregateError` if all fail (fallbacks/mirrors).',
+            },
+            {
+              title: 'Build it',
+              body: `\`\`\`ts
+const [user, orders] = await Promise.all([getUser(id), getOrders(id)])
+const [recs] = await Promise.allSettled([getRecommendations(id)])
+const recommendations = recs.status === 'fulfilled' ? recs.value : []
+\`\`\`
+Start both groups before awaiting if they are independent.`,
+            },
+            {
+              title: 'Edge cases and trade-offs',
+              body: 'A rejection in `all` does **not** cancel the others; pass an `AbortSignal` and abort on failure. Prefer `AbortSignal.timeout(5000)` over `race` with a timer because it cancels the request. Every promise needs a handler or Node exits on `unhandledrejection`.',
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"Critical data goes through Promise.all so we fail fast; optional widgets go through allSettled so one flaky service doesn\'t blank the page. Promises aren\'t cancellable, so I wire AbortController for timeouts and early failure."*',
+            },
           ],
           answer: `**Use \`Promise.all\` for the data the page cannot work without, and \`Promise.allSettled\` for optional parts, so a failing recommendations service does not take down the page.**
 
@@ -409,9 +544,43 @@ const recommendations = recs.status === 'fulfilled' ? recs.value : []
   }
 }`,
           },
+          intent:
+            'Tests whether you know `forEach` ignores returned promises and why the surrounding try/catch cannot see the rejections. A strong answer explains both symptoms, offers sequential and parallel fixes, and mentions bounding concurrency.',
           hints: [
-            'What does forEach do with the value its callback returns?',
-            'Where does a rejection inside the callback go?',
+            'An `async` callback returns a promise. What does `forEach` do with the return value of its callback?',
+            'If nobody awaits those promises, when does `\'all saved\'` log, and where do later rejections end up relative to the `try` block?',
+            'You need something that gives you the promises back: `for...of` with `await` (sequential), or `map` + `Promise.all/allSettled` (parallel).',
+            'Near-answer: `for (const user of users) await api.save(user)` inside the try, or `const results = await Promise.allSettled(users.map((u) => api.save(u)))` and then count `r.status === \'rejected\'`.',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate the symptoms',
+              body: 'Two bugs: "all saved" logs **before** saves finish, and errors **never reach** `catch`. Both point to the promises not being awaited.',
+            },
+            {
+              title: 'Find the cause',
+              body: '`forEach` calls the async callback, gets a promise back and **throws it away**. It returns synchronously, so the log runs immediately. Rejections happen later, after `try` has exited, so they become **unhandled rejections**.',
+            },
+            {
+              title: 'Fix it two ways',
+              body: `\`\`\`js
+// sequential: order or rate limits matter
+for (const user of users) await api.save(user)
+
+// parallel: faster, collect failures
+const results = await Promise.allSettled(users.map((u) => api.save(u)))
+const failed = results.filter((r) => r.status === 'rejected')
+\`\`\`
+Use \`Promise.all\` if one failure should fail the whole operation.`,
+            },
+            {
+              title: 'Edge cases and trade-offs',
+              body: '`await users.forEach(...)` does nothing (`forEach` returns `undefined`). `filter`/`some`/`reduce` with async callbacks are also broken; `filter` sees every promise as truthy. Thousands of items need a **concurrency limit**, not unbounded `map`.',
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"forEach discards the promises, so the function finishes immediately and the rejections fire outside the try. I\'d use for...of if order or rate limits matter, otherwise map plus allSettled, and a pool if the batch is large."*',
+            },
           ],
           answer: `**\`forEach\` ignores the promises its async callback returns.** It starts every save, returns synchronously, and \`'all saved'\` is logged immediately. The rejections happen *later*, outside the \`try\` block, so they become **unhandled rejections** that the \`catch\` never sees.
 
@@ -463,10 +632,50 @@ Use \`Promise.all\` instead if one failure should fail the whole operation. For 
           estMinutes: 20,
           roles: ['frontend', 'full-stack', 'backend'],
           prompt: `Implement \`mapWithConcurrency(items, limit, fn)\`. It runs the async \`fn\` over \`items\` with **at most \`limit\` calls in flight**, and resolves with the results **in input order**.`,
+          intent:
+            'Tests concurrency control with promises and an accurate model of the single-threaded event loop. A strong answer uses N workers pulling from a shared cursor (not fixed batches), writes results by index, and states an explicit error policy.',
           hints: [
-            'Start `limit` workers that each pull the next index from a shared counter.',
-            'JavaScript is single-threaded: `next++` between awaits cannot race.',
-            'Write results by index to keep the input order.',
+            'Fixed batches of `limit` (await a batch, then the next) are easy but leave slots idle waiting for the slowest. What keeps every slot busy?',
+            'Start `limit` async **workers**. Each one loops: claim the next index, await `fn`, repeat until none are left.',
+            'The claim `const i = next++` is synchronous, so two workers can never get the same index. Store `results[i]` to keep input order.',
+            'Skeleton: `async function worker() { while (next < items.length) { const i = next++; results[i] = await fn(___, i) } } await Promise.all(Array.from({ length: Math.min(limit, items.length) }, ___)); return results`',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate and clarify',
+              body: 'Run `fn` over all items, never more than `limit` in flight, results in **input** order. Ask: on error, fail fast or collect? Is `limit` ≥ 1? Empty input → `[]`.',
+            },
+            {
+              title: 'Choose the design',
+              body: '**Worker pool**: `limit` workers share a cursor and pull work. Unlike fixed batches, a fast worker immediately picks the next item, so throughput is not bounded by the slowest call in each batch.',
+            },
+            {
+              title: 'Build it',
+              body: `\`\`\`ts
+async function mapWithConcurrency<T, R>(
+  items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let next = 0
+  async function worker() {
+    while (next < items.length) {
+      const i = next++
+      results[i] = await fn(items[i], i)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker))
+  return results
+}
+\`\`\``,
+            },
+            {
+              title: 'Edge cases and trade-offs',
+              body: 'No race on `next`: JavaScript runs one piece of code at a time. The first rejection rejects `Promise.all`, but other workers keep going; catch inside the worker for `allSettled` style, or share an `AbortController`. Concurrency limit ≠ rate limit (token bucket).',
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"I start limit workers that each pull the next index from a shared counter. Claiming the index is synchronous, so there\'s no race, and writing by index keeps order. I\'d make the error policy explicit and add AbortSignal for cancellation."*',
+            },
           ],
           answer: `**Use a worker pool: \`limit\` async workers share a cursor and pull items until none are left.**
 
@@ -529,10 +738,63 @@ This is how libraries such as \`p-limit\` work, and it is the in-process version
           estMinutes: 20,
           roles: ['frontend', 'full-stack'],
           prompt: `Implement \`debounce\` and \`throttle\`. Then: a debounced search box still sometimes shows results for an **older** query. Why, and how do you fix it?`,
+          intent:
+            'Tests closures and timers (debounce/throttle), choosing between them by use case, and spotting that debounce does not fix out-of-order responses. A strong answer fixes the race with AbortController or a request id and places cleanup in the framework lifecycle.',
           hints: [
-            'Debounce: reset a timer on every call. Throttle: allow at most one call per interval.',
-            'Debouncing reduces the number of requests, but responses can still arrive out of order.',
-            'Cancel the previous request, or ignore responses that are not from the latest one.',
+            'Debounce: what state must survive between calls, and what should every call do to it?',
+            'Throttle: remember when you last ran; ignore calls until `interval` ms have passed.',
+            'The race: two requests are in flight. Which one finishes last, and does debounce control that?',
+            'Near-answer: `controller?.abort(); controller = new AbortController(); fetch(url, { signal: controller.signal })`, and ignore `AbortError` in the catch. Or keep `const id = ++latest` and drop responses where `id !== latest`.',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate and clarify',
+              body: 'Two utilities plus a bug: **debounce** fires after `wait` ms of silence, **throttle** at most once per interval, and a debounced search sometimes shows **older** results. Ask whether leading/trailing options are needed.',
+            },
+            {
+              title: 'Build debounce and throttle',
+              body: `\`\`\`ts
+function debounce<A extends unknown[]>(fn: (...args: A) => void, wait: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const d = (...args: A) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), wait) }
+  d.cancel = () => clearTimeout(timer)
+  return d
+}
+
+function throttle<A extends unknown[]>(fn: (...args: A) => void, interval: number) {
+  let last = 0
+  return (...args: A) => {
+    const now = Date.now()
+    if (now - last >= interval) { last = now; fn(...args) }
+  }
+}
+\`\`\``,
+            },
+            {
+              title: 'Diagnose the race',
+              body: 'Debounce reduces **how many** requests go out, not **when they return**. A slow response for `"rea"` can land after a fast one for `"react"` and overwrite it. That is a race condition, not a timing-constant problem.',
+            },
+            {
+              title: 'Fix it',
+              body: `\`\`\`ts
+let controller: AbortController | undefined
+async function search(q: string) {
+  controller?.abort()
+  controller = new AbortController()
+  try {
+    const res = await fetch(\`/api/search?q=\${encodeURIComponent(q)}\`, { signal: controller.signal })
+    render(await res.json())
+  } catch (err) {
+    if ((err as Error).name !== 'AbortError') throw err
+  }
+}
+\`\`\`
+If the work cannot be aborted, use a request id and ignore stale responses.`,
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"Debounce resets a timer per call; throttle gates on the last run time. Search gets debounce, scroll gets throttle or rAF. Debounce doesn\'t order responses, so I abort the previous request, in React in the effect cleanup, in Vue with onWatcherCleanup."*',
+            },
           ],
           answer: `**Debounce** waits until calls have stopped for \`wait\` ms. **Throttle** runs at most once per \`interval\`.
 
@@ -611,10 +873,13 @@ An alternative is a **request id**: increment a counter for each request and ign
           estMinutes: 6,
           roles: ['frontend', 'full-stack', 'backend'],
           prompt: `A long-running SPA (or a Node worker) slowly grows in memory. **How does JavaScript garbage collection work, what usually causes leaks, and where do \`Map\`, \`Set\`, \`WeakMap\` and \`WeakSet\` fit in?**`,
+          intent:
+            'Tests whether you reason about leaks as "still reachable but no longer needed", can name the usual culprits in SPAs and Node workers, and know what weak collections do and do not guarantee. Strong answers end with how to diagnose a leak.',
           hints: [
-            'GC frees what is unreachable, not what is unused.',
-            'Think listeners, timers, caches and closures.',
-            'Weak collections do not keep their keys alive.',
+            'The GC does not know what you still need. What property of an object decides whether it can be collected?',
+            'List things that keep references alive after a component or job is "done": listeners, timers, caches, closures, detached DOM.',
+            'A `WeakMap` key does not keep its object alive. Why does that make weak collections non-iterable with no `size`?',
+            'Near-answer: reachability from roots → generational mark-and-sweep → leak sources list → Map/Set vs WeakMap/WeakSet table → heap-snapshot comparison in DevTools.',
           ],
           answer: `**The GC frees objects that are no longer reachable from the roots** (the global object, the active stack and closures in use). **A leak is memory that is still reachable but no longer needed.** V8 uses a *generational*, mostly concurrent *mark-and-sweep/compact* collector: most objects die young in a cheap young generation, and survivors are promoted to the old generation.
 
@@ -664,10 +929,46 @@ Weak collections are **not iterable and have no size**, because their contents d
           estMinutes: 15,
           roles: ['full-stack', 'backend'],
           prompt: `An API returns paginated results: \`{ items, nextCursor }\`. **Write an async generator that yields every item across all pages**, so the caller can write \`for await (const item of allItems())\`. What does the iterator protocol look like underneath?`,
+          intent:
+            'Tests whether you can turn cursor pagination into a lazy stream with an async generator and explain the iterator protocol underneath. A strong answer fetches pages only on demand and knows that `break` triggers `return()` and `finally`.',
           hints: [
-            'An async generator is `async function*`.',
-            'Loop while there is a cursor, and `yield` each item.',
-            'The protocol is an object with a next() method returning { value, done }.',
+            'The caller wants `for await (const item of ...)`. Which kind of function produces an async iterable directly?',
+            'Inside `async function*`, loop: fetch a page with the current cursor, yield its items, move to `nextCursor`, stop when it is `null`.',
+            '`yield* page.items` yields each item of an array. A `do...while` handles the first request with a `null` cursor.',
+            'Skeleton: `async function* allItems(fetchPage) { let cursor = null; do { const page = await fetchPage(cursor); yield* ___; cursor = ___ } while (cursor) }`',
+          ],
+          walkthrough: [
+            {
+              title: 'Restate and clarify',
+              body: 'Wrap a cursor-paginated API so callers can iterate every item with `for await`. Ask: should pages be fetched lazily (yes, usually)? What does the first request send as a cursor?',
+            },
+            {
+              title: 'Choose the tool',
+              body: 'An **async generator** (`async function*`) is both the producer and an async iterable. `yield` pauses until the consumer asks for the next value, so pages are fetched **on demand**.',
+            },
+            {
+              title: 'Build it',
+              body: `\`\`\`ts
+async function* allItems<T>(
+  fetchPage: (cursor: string | null) => Promise<{ items: T[]; nextCursor: string | null }>,
+): AsyncGenerator<T> {
+  let cursor: string | null = null
+  do {
+    const page = await fetchPage(cursor)
+    yield* page.items
+    cursor = page.nextCursor
+  } while (cursor)
+}
+\`\`\``,
+            },
+            {
+              title: 'Protocol and edge cases',
+              body: 'Iterable: `[Symbol.asyncIterator]()` returns an iterator whose `next()` resolves to `{ value, done }`. `break` in the consumer calls `return()`, so `finally` blocks run and no more pages are fetched. Collecting all pages into an array first defeats laziness.',
+            },
+            {
+              title: 'Say it in the interview',
+              body: '*"An async generator gives a lazy stream: fetch a page, yield its items, follow the cursor. The consumer pulls, so breaking early stops fetching. Underneath it\'s just an object with next() returning value and done."*',
+            },
           ],
           answer: `**An async generator turns cursor pagination into a lazy stream.** Pages are fetched only as the consumer asks for more items.
 
@@ -728,9 +1029,13 @@ const range = {
           estMinutes: 5,
           roles: ['frontend', 'full-stack', 'backend'],
           prompt: `**What are the practical differences between ES modules and CommonJS?** Why does tree-shaking depend on ESM, and what problems have you hit mixing the two in Node?`,
+          intent:
+            'Tests whether you understand that ESM is static and CommonJS is a runtime function call, and can connect that to tree-shaking, code splitting and real Node interop problems. Strong answers use a concrete packaging example.',
           hints: [
-            'One is static and analysable at build time; the other is a function call at runtime.',
-            'Think about live bindings and top-level await.',
+            'Can a bundler know what `require(name)` returns before the code runs? Can it know what `import { x } from \'y\'` imports?',
+            'Compare what each gives you: a live binding to the exporter\'s variable, or a copy of `module.exports` at require time.',
+            'Think Node interop: the `"type"` field, `.mjs`/`.cjs`, conditional `"exports"`, and what Node 22+ changed about `require()` of ESM.',
+            'Near-answer: static vs dynamic → tree-shaking (+ `"sideEffects": false`) → dynamic `import()` for code splitting → interop table and the dual-package hazard.',
           ],
           answer: `**ESM is static** (\`import\` and \`export\` are declarations resolved before any code runs). **CommonJS is dynamic** (\`require()\` is a synchronous function call at runtime that returns a \`module.exports\` object).
 
