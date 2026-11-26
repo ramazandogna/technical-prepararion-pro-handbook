@@ -10,6 +10,8 @@ const CODE_KEY = 'ios-sync-code'
 const MODE_KEY = 'ios-sync-mode'
 const REMOTE_AT_KEY = 'ios-sync-remote-at'
 const DEBOUNCE_MS = 2500
+/** After a failed sync, try again this often (and whenever the browser comes back online). */
+const RETRY_MS = 60_000
 
 type Mode = 'unset' | 'offline' | 'cloud'
 
@@ -63,7 +65,7 @@ export const useSyncStore = defineStore('sync', () => {
 
   /** Pull + merge the remote copy when it changed elsewhere, then upload if anything differs. */
   async function syncOnce(): Promise<void> {
-    if (mode.value !== 'cloud') return
+    if (mode.value !== 'cloud' && !keys) return
     status.value = 'syncing'
     try {
       const k = await getKeys()
@@ -86,6 +88,10 @@ export const useSyncStore = defineStore('sync', () => {
     } catch (e) {
       status.value = 'error'
       error.value = e instanceof Error ? e.message : String(e)
+      if (mode.value === 'cloud') {
+        clearTimeout(timer)
+        timer = setTimeout(() => void syncNow(), RETRY_MS)
+      }
       throw e
     }
   }
@@ -127,6 +133,7 @@ export const useSyncStore = defineStore('sync', () => {
       { deep: true },
     )
     document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('online', onVisibility)
   }
 
   function onVisibility() {
@@ -145,19 +152,18 @@ export const useSyncStore = defineStore('sync', () => {
     const c = rawCode.trim()
     keys = await deriveKeys(c) // validates length
     code.value = c
-    mode.value = 'cloud'
     lastSyncedAt.value = null
     lastPushed = ''
     try {
-      await syncOnce()
+      await syncOnce() // the gate stays up until the copy is merged and uploaded
     } catch (e) {
       code.value = null
-      mode.value = 'unset'
       keys = null
       throw e
     }
     ls.set(CODE_KEY, c)
     ls.set(MODE_KEY, 'cloud')
+    mode.value = 'cloud'
     startAuto()
   }
 
@@ -183,6 +189,8 @@ export const useSyncStore = defineStore('sync', () => {
     stopWatch?.()
     stopWatch = null
     document.removeEventListener('visibilitychange', onVisibility)
+    window.removeEventListener('online', onVisibility)
+    clearTimeout(timer)
     code.value = null
     keys = null
     lastPushed = ''

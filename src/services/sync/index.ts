@@ -60,13 +60,19 @@ export async function deriveKeys(rawCode: string): Promise<SyncKeys> {
   return { slot, key }
 }
 
+const TIMEOUT_MS = 20_000
+
+/** fetch with a timeout and one retry — the free store is occasionally slow. */
 async function request(url: string, init?: RequestInit): Promise<Response> {
-  let res: Response
-  try {
-    res = await fetch(url, { ...init, cache: 'no-store' })
-  } catch {
-    throw new Error('Cloud sync is unreachable (offline?). Your progress is still saved on this device.')
+  let res: Response | undefined
+  for (let attempt = 0; attempt < 2 && !res; attempt++) {
+    try {
+      res = await fetch(url, { ...init, cache: 'no-store', signal: AbortSignal.timeout(TIMEOUT_MS) })
+    } catch {
+      /* network error or timeout: retry once */
+    }
   }
+  if (!res) throw new Error('Cloud sync is unreachable right now. Your progress is still saved on this device.')
   if (!res.ok) throw new Error(`Cloud sync failed (HTTP ${res.status}). Your progress is still saved on this device.`)
   return res
 }
